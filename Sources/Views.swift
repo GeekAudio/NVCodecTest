@@ -302,6 +302,7 @@ private struct EnvironmentEvidenceContent: View {
 struct MainView: View {
     @ObservedObject var model: TestModel
     @State private var category: ResultCategory = .all
+    @State private var showingFeedback = false
     private let columns = [GridItem(.adaptive(minimum: 248), spacing: 12)]
 
     var body: some View {
@@ -331,6 +332,12 @@ struct MainView: View {
         }
         .frame(minWidth: 860, minHeight: 640)
         .background(Color(NSColor.windowBackgroundColor))
+        .sheet(isPresented: $showingFeedback) {
+            FeedbackView(refreshHistory: model.feedbackHistoryLoader(),
+                         deleteDiagnostic: { try model.deleteDiagnostic($0) },
+                         clearHistory: { try model.diagnosticStore?.clear() },
+                         storageNotice: model.diagnosticLogError)
+        }
     }
 
     private var pageNavigation: some View {
@@ -595,7 +602,9 @@ struct MainView: View {
         HStack(spacing: 9) {
             Button("测量方法") { model.selectedPage = .methods }
                 .font(.system(size: 10.5)).buttonStyle(PlainButtonStyle()).foregroundColor(.systemBlue)
-            Text("合成负载诊断 · FPS 非等画质比较 · 非官方认证分数")
+            Button("日志与反馈") { showingFeedback = true }
+                .font(.system(size: 10.5)).buttonStyle(PlainButtonStyle()).foregroundColor(.systemBlue)
+            Text(model.diagnosticLogError == nil ? "日志仅存本机 · 反馈前可预览" : "日志保存失败，点“日志与反馈”查看")
                 .font(.system(size: 10)).foregroundColor(.sub)
             Spacer(minLength: 6)
             Menu {

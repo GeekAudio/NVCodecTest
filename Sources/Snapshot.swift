@@ -7,7 +7,7 @@ enum Snapshot {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         if CommandLine.arguments.contains("--dark") { app.appearance = NSAppearance(named: .darkAqua) }
-        let model = TestModel(loadImmediately: false)
+        let model = TestModel(loadImmediately: false, recordDiagnostics: false)
         if let reportPath = SelfTest.argument("--results-json") {
             do {
                 let report = try SelfTest.loadJSON(path: reportPath)
@@ -47,7 +47,10 @@ enum Snapshot {
         let width = max(860, min(2000, Double(SelfTest.argument("--width") ?? "960") ?? 960))
         let height = max(640, min(1800, Double(SelfTest.argument("--height") ?? "780") ?? 780))
         let size = NSSize(width: width, height: height)
-        let host = NSHostingView(rootView: MainView(model: model))
+        let view = CommandLine.arguments.contains("--feedback")
+            ? AnyView(FeedbackView(currentDiagnostic: model.currentFeedbackDiagnostic))
+            : AnyView(MainView(model: model))
+        let host = NSHostingView(rootView: view)
         host.frame = NSRect(origin: .zero, size: size)
         host.wantsLayer = true
         let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)

@@ -373,6 +373,11 @@ enum EnvProbe {
         let architecture = sysctlInt("hw.optional.arm64") == 1 ? "arm64" : "x86_64"
         rows.append(EnvRow("架构", architecture,
                            note: architecture == "arm64" ? "Apple Silicon：测试本机编解码器；NullMoth 不适用" : ""))
+        rows.append(EnvRow("机型", sysctlString("hw.model") ?? "系统未提供",
+                           note: "系统报告的 SMBIOS 机型；黑苹果可能由引导配置指定，不采集序列号"))
+        rows.append(EnvRow("CPU", sysctlString("machdep.cpu.brand_string") ?? "型号未提供",
+                           note: "\(ProcessInfo.processInfo.processorCount) 个逻辑处理器"))
+        rows.append(EnvRow("内存", String(format: "%.0f GiB", Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824)))
 
         // 枚举全部 GPU，使双显卡机器上的非默认 NVIDIA Metal 插件也有机会初始化。
         let devices = initializeMetalDevices()

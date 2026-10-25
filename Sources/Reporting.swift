@@ -185,7 +185,17 @@ enum SelfTest {
 
     static func run(diagnosticsOnly: Bool = false) {
         print("NVIDIA 编解码诊断 · \(diagnosticsOnly ? "环境诊断" : "完整测试")")
+        var log: RunLogRecorder?
+        do {
+            let store = try DiagnosticLogStore()
+            log = try RunLogRecorder(store: store, kind: diagnosticsOnly ? "命令行环境诊断" : "命令行完整测试") { message in
+                FileHandle.standardError.write(Data("日志未完整留存：\(message)\n".utf8))
+            }
+        } catch {
+            FileHandle.standardError.write(Data("无法建立诊断日志：\(DiagnosticRedactor.redact(error.localizedDescription))\n".utf8))
+        }
         let snapshot = EnvProbe.captureEnvironment()
+        log?.capture(snapshot)
         var rows: [BenchRow] = []
         var wasCancelled = false
         if !diagnosticsOnly {
@@ -196,14 +206,113 @@ enum SelfTest {
             interrupt.setEventHandler { cancellation.cancel() }
             interrupt.resume()
             rows = CodecBench.runAll(progress: { progress, message in
+                log?.progress(progress, message: message)
                 let line = String(format: "%3.0f%% · %@\n", progress * 100, message)
                 FileHandle.standardError.write(Data(line.utf8))
-            }, cancellation: cancellation)
+            }, onRow: { log?.record($0) }, cancellation: cancellation)
             wasCancelled = cancellation.isCancelled
             interrupt.cancel()
         }
+        log?.finish(cancelled: wasCancelled)
         print(renderText(env: snapshot.rows, encoders: snapshot.encoders, results: rows,
                          driverReport: snapshot.driver, environmentDate: snapshot.capturedAt, wasCancelled: wasCancelled))
         saveOutputs(snapshot: snapshot, results: rows, wasCancelled: wasCancelled)
+    }
+}
+
+/// 阶段事件在独立队列写入；环境和每项完整快照只在帧测量区间之外保存。
+/// 避免大型 JSON 脱敏与下一项 GPU 测量重叠，也不把磁盘等待计入 FPS。
+final class RunLogRecorder {
+    let store: DiagnosticLogStore
+    private let session: DiagnosticLogSession
+    private let queue = DispatchQueue(label: "com.geekaudio.NVCodecTest.diagnostic-log", qos: .utility,
+                                      autoreleaseFrequency: .workItem)
+    private let onError: (String) -> Void
+    private var snapshot: EnvironmentSnapshot?
+    private var rows: [BenchRow] = []
+    private var lastPhase = ""
+    private var lastProgressTime: TimeInterval = 0
+    private var reportedError = false
+
+    init(store: DiagnosticLogStore, kind: String, onError: @escaping (String) -> Void) throws {
+        self.store = store
+        self.onError = onError
+        session = try store.begin(kind: kind, version: SelfTest.version)
+        try session.event(message: "正在采集本轮环境", phase: "environment")
+    }
+
+    func capture(_ snapshot: EnvironmentSnapshot) {
+        queue.sync {
+            autoreleasepool {
+                self.snapshot = snapshot
+                self.persist {
+                    try self.session.capture(reportJSON: self.report())
+                    try self.session.event(message: "环境采集完成", phase: "environment")
+                }
+            }
+        }
+    }
+
+    func progress(_ value: Double, message: String) {
+        queue.async {
+            let phase = message.replacingOccurrences(of: #"\d+"#, with: "#", options: .regularExpression)
+            let time = ProcessInfo.processInfo.systemUptime
+            guard phase != self.lastPhase || time - self.lastProgressTime >= 5 else { return }
+            self.lastPhase = phase
+            self.lastProgressTime = time
+            self.persist {
+                try self.session.event(message: message, phase: "benchmark", details: ["progress": String(format: "%.4f", value)])
+            }
+        }
+    }
+
+    func record(_ row: BenchRow) {
+        // onRow 在会话完成并 Invalidate 后调用，此处等待不会改变该项计时。
+        queue.sync {
+            autoreleasepool {
+                self.rows.removeAll { $0.id == row.id }
+                self.rows.append(row)
+                self.persist {
+                    try self.session.event(message: "\(row.group) · \(row.item) · \(row.mode)：\(row.status.rawValue)", phase: "result",
+                                           details: ["hardwareEvidence": row.hardwareEvidence, "gpuEvidence": row.gpuEvidence,
+                                                     "nvidiaEvidence": row.nvidiaEvidence, "detail": row.detail])
+                    try self.session.capture(reportJSON: self.report())
+                }
+            }
+        }
+    }
+
+    func requestCancellation() {
+        queue.async { self.persist { try self.session.event(message: "用户请求安全取消", phase: "cancel") } }
+    }
+
+    func finish(cancelled: Bool) {
+        queue.sync {
+            do { try self.session.finish(reportJSON: self.report(cancelled: cancelled), cancelled: cancelled) }
+            catch {
+                self.reportError(error)
+                // 完整快照保存失败时，仍尽力终结会话；不要把正常结束误记成进程中断。
+                self.persist { try self.session.event(message: "最后快照未完整保存，保留此前记录", phase: "log-error") }
+                self.persist { try self.session.finish(cancelled: cancelled) }
+            }
+        }
+    }
+
+    private func report(cancelled: Bool = false) throws -> String {
+        guard let snapshot = snapshot else {
+            throw NSError(domain: "NVCodecLog", code: 1, userInfo: [NSLocalizedDescriptionKey: "本轮尚未采集环境快照"])
+        }
+        return try SelfTest.renderJSON(env: snapshot.rows, encoders: snapshot.encoders, results: rows,
+                                      driverReport: snapshot.driver, environmentDate: snapshot.capturedAt,
+                                      wasCancelled: cancelled, decoderCapabilities: snapshot.decoderCaps)
+    }
+
+    private func persist(_ operation: () throws -> Void) {
+        do { try operation() }
+        catch { reportError(error) }
+    }
+
+    private func reportError(_ error: Error) {
+        if !reportedError { onError(DiagnosticRedactor.redact(error.localizedDescription)); reportedError = true }
     }
 }

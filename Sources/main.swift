@@ -45,6 +45,7 @@ if CommandLine.arguments.contains("--help") {
       --with-results              截图前运行完整矩阵
       --results-json <path.json>   用已保存报告渲染，无需重跑负载
       --page <results|environment|methods> 选择截图页面
+      --feedback                  截图日志与反馈预览（不打开网页）
       --width <points> --height <points>   截图尺寸（默认 960×780）
     """)
     exit(0)
