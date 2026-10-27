@@ -94,7 +94,7 @@ struct FeedbackView: View {
             header
             Divider()
             HStack(alignment: .top, spacing: 0) {
-                historySidebar.frame(width: 228)
+                historySidebar.frame(width: 200)
                 Divider()
                 feedbackBody.padding(20)
             }
@@ -103,7 +103,7 @@ struct FeedbackView: View {
         }
         .frame(minWidth: 850, idealWidth: 980, maxWidth: .infinity,
                minHeight: 650, idealHeight: 760, maxHeight: .infinity)
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(Color.codecBackground).preferredColorScheme(.light)
         .onAppear { reloadHistory(firstLoad: true) }
         .alert(item: $activeAlert, content: makeAlert)
         .sheet(isPresented: $logEditorPresented) {
@@ -119,7 +119,7 @@ struct FeedbackView: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 23)).foregroundColor(Color(NSColor.systemGreen))
+                .font(.system(size: 23)).foregroundColor(Color.codecAccent)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 4) {
                 Text("日志与 GitHub 反馈").font(.system(size: 19, weight: .semibold))
@@ -166,10 +166,10 @@ struct FeedbackView: View {
                                 }
                                 .padding(10).frame(maxWidth: .infinity, alignment: .leading)
                                 .background(RoundedRectangle(cornerRadius: 7).fill(
-                                    selected?.id == diagnostic.id ? Color(NSColor.selectedContentBackgroundColor).opacity(0.14)
-                                    : Color(NSColor.controlBackgroundColor)))
+                                    selected?.id == diagnostic.id ? Color.codecAccent.opacity(0.14)
+                                    : Color.cardBG))
                                 .overlay(RoundedRectangle(cornerRadius: 7).stroke(
-                                    selected?.id == diagnostic.id ? Color(NSColor.keyboardFocusIndicatorColor).opacity(0.5)
+                                    selected?.id == diagnostic.id ? Color.codecAccent.opacity(0.5)
                                     : Color.clear, lineWidth: 1))
                             }.buttonStyle(PlainButtonStyle())
                         }
@@ -178,7 +178,7 @@ struct FeedbackView: View {
             }
             if let notice = storageNotice, !notice.isEmpty {
                 Text("日志留存提示：" + DiagnosticRedactor.redact(notice))
-                    .font(.system(size: 10.5)).foregroundColor(Color(NSColor.systemOrange))
+                    .font(.system(size: 10.5)).foregroundColor(Color.warnOrange)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Text("最近 20 次 · 最长 30 天 · 仅存本机。运行中的记录可能尚无完整报告；此处读取已落盘内容。")
@@ -209,7 +209,7 @@ struct FeedbackView: View {
                             .font(.system(size: 11)).foregroundColor(.secondary)
                             .padding(.horizontal, 5).padding(.vertical, 6).allowsHitTesting(false)
                     }
-                }.overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(NSColor.separatorColor)))
+                }.overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.sep))
             }
             HStack(spacing: 10) {
                 Picker("预览内容", selection: $previewTab) {
@@ -221,7 +221,7 @@ struct FeedbackView: View {
             HStack(spacing: 10) {
                 if usingEditedCopy {
                     Text("删减副本 · 仅 TXT").font(.system(size: 10, weight: .medium))
-                        .foregroundColor(Color(NSColor.systemOrange))
+                        .foregroundColor(Color.warnOrange)
                     Button("还原原日志") {
                         if let id = originalSelection?.id { editedLogs.removeValue(forKey: id) }
                         operationNotice = "已还原本机原日志；提交前请重新检查"
@@ -239,10 +239,10 @@ struct FeedbackView: View {
             }
             FeedbackTextPreview(text: previewText)
                 .frame(minHeight: 220, maxHeight: .infinity)
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(NSColor.separatorColor)))
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.sep))
             Text(draft.notice)
                 .font(.system(size: 10.5))
-                .foregroundColor(draft.requiresManualAttachment ? Color(NSColor.systemOrange) : .secondary)
+                .foregroundColor(draft.requiresManualAttachment ? Color.warnOrange : .secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Text("前往时会把网页草稿交给 GitHub，确认提交后公开。附件拖入网页时即会上传。")
                 .font(.system(size: 10.5)).foregroundColor(.secondary)
@@ -433,8 +433,8 @@ private struct FeedbackLogEditor: View {
             Text("可删除你不愿公开的内容。应用时会再次脱敏，并以此副本生成预览、复制内容和 TXT 导出；原本机日志不变，原诊断 JSON 将禁用。")
                 .font(.system(size: 11)).foregroundColor(.secondary)
             TextEditor(text: $text).font(.system(size: 11, design: .monospaced)).disabled(applying)
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(NSColor.separatorColor)))
-            if let message = errorMessage { Text(message).font(.system(size: 11)).foregroundColor(Color(NSColor.systemOrange)) }
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.sep))
+            if let message = errorMessage { Text(message).font(.system(size: 11)).foregroundColor(Color.warnOrange) }
             HStack {
                 if applying { ProgressView("正在脱敏副本，请稍候…").font(.system(size: 10.5)) }
                 else { Text("请保留关键错误码与复现信息，避免删去诊断上下文。")

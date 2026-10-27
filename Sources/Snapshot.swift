@@ -6,7 +6,7 @@ enum Snapshot {
     static func run(path: String, withResults: Bool, running: Bool = false) {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
-        if CommandLine.arguments.contains("--dark") { app.appearance = NSAppearance(named: .darkAqua) }
+        app.appearance = NSAppearance(named: .aqua)
         let model = TestModel(loadImmediately: false, recordDiagnostics: false)
         if let reportPath = SelfTest.argument("--results-json") {
             do {
@@ -30,11 +30,14 @@ enum Snapshot {
                 model.start()
                 for _ in 0..<100 { RunLoop.current.run(until: Date().addingTimeInterval(0.04)) }
             } else if withResults {
-                let rows = CodecBench.runAll { progress, message in
-                    FileHandle.standardError.write(Data(String(format: "%3.0f%% · %@\n", progress * 100, message).utf8))
-                }
-                applyResults(rows, to: model)
-                SelfTest.saveOutputs(snapshot: snapshot, results: rows)
+                var measuredSnapshot = snapshot
+                var rows: [BenchRow] = []
+                let completion = CodecWorkerClient().run(onEvent: { event in
+                    if let environment = event.environment { measuredSnapshot = environment; model.applyEnvironment(environment) }
+                    if let row = event.row { rows.append(row) }
+                }, onDiagnostic: { FileHandle.standardError.write(Data(($0 + "\n").utf8)) })
+                applyResults(rows, to: model, wasCancelled: completion.cancelled)
+                SelfTest.saveOutputs(snapshot: measuredSnapshot, results: rows, wasCancelled: completion.cancelled)
             }
         }
 
@@ -44,12 +47,17 @@ enum Snapshot {
         default: model.selectedPage = .results
         }
 
-        let width = max(860, min(2000, Double(SelfTest.argument("--width") ?? "960") ?? 960))
-        let height = max(640, min(1800, Double(SelfTest.argument("--height") ?? "780") ?? 780))
+        let width = max(960, min(2000, Double(SelfTest.argument("--width") ?? "980") ?? 980))
+        let height = max(660, min(1800, Double(SelfTest.argument("--height") ?? "670") ?? 670))
         let size = NSSize(width: width, height: height)
-        let view = CommandLine.arguments.contains("--feedback")
-            ? AnyView(FeedbackView(currentDiagnostic: model.currentFeedbackDiagnostic))
-            : AnyView(MainView(model: model))
+        let view: AnyView
+        if CommandLine.arguments.contains("--feedback") {
+            view = AnyView(FeedbackView(currentDiagnostic: model.currentFeedbackDiagnostic).preferredColorScheme(.light))
+        } else if model.selectedPage == .environment {
+            view = AnyView(DetailWindow(title: "完整环境与驱动证据") { EnvironmentEvidenceContent(model: model) })
+        } else if model.selectedPage == .methods {
+            view = AnyView(DetailWindow(title: "测量方法") { MeasurementMethodsView() })
+        } else { view = AnyView(MainView(model: model)) }
         let host = NSHostingView(rootView: view)
         host.frame = NSRect(origin: .zero, size: size)
         host.wantsLayer = true

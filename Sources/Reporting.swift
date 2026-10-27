@@ -194,26 +194,37 @@ enum SelfTest {
         } catch {
             FileHandle.standardError.write(Data("无法建立诊断日志：\(DiagnosticRedactor.redact(error.localizedDescription))\n".utf8))
         }
-        let snapshot = EnvProbe.captureEnvironment()
-        log?.capture(snapshot)
+        var snapshot: EnvironmentSnapshot?
         var rows: [BenchRow] = []
         var wasCancelled = false
-        if !diagnosticsOnly {
-            let cancellation = BenchCancellation()
-            // Ctrl-C 请求安全停止，不在 VideoToolbox 回调中强杀线程。
+        var processFailed = false
+        if diagnosticsOnly {
+            snapshot = EnvProbe.captureEnvironment()
+            log?.capture(snapshot!)
+        } else {
+            let client = CodecWorkerClient()
             signal(SIGINT, SIG_IGN)
             let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global(qos: .userInitiated))
-            interrupt.setEventHandler { cancellation.cancel() }
-            interrupt.resume()
-            rows = CodecBench.runAll(progress: { progress, message in
-                log?.progress(progress, message: message)
-                let line = String(format: "%3.0f%% · %@\n", progress * 100, message)
-                FileHandle.standardError.write(Data(line.utf8))
-            }, onRow: { log?.record($0) }, cancellation: cancellation)
-            wasCancelled = cancellation.isCancelled
+            interrupt.setEventHandler { log?.requestCancellation(); client.cancel() }; interrupt.resume()
+            let completion = client.run(onEvent: { event in
+                if let environment = event.environment { snapshot = environment; log?.capture(environment) }
+                if let row = event.row { rows.append(row); log?.record(row) }
+                if let progress = event.progress, let message = event.message {
+                    log?.progress(progress, message: message)
+                    FileHandle.standardError.write(Data(String(format: "%3.0f%% · %@\n", progress * 100, message).utf8))
+                }
+            }, onDiagnostic: { message in
+                log?.driverMessage(message)
+                FileHandle.standardError.write(Data((message + "\n").utf8))
+            })
             interrupt.cancel()
+            wasCancelled = completion.cancelled; processFailed = !completion.complete && !completion.cancelled
         }
-        log?.finish(cancelled: wasCancelled)
+        guard let snapshot else {
+            log?.finish(cancelled: wasCancelled, failed: true)
+            FileHandle.standardError.write(Data("测试进程未提供环境快照，请查看诊断日志。\n".utf8)); exit(1)
+        }
+        log?.finish(cancelled: wasCancelled, failed: processFailed)
         print(renderText(env: snapshot.rows, encoders: snapshot.encoders, results: rows,
                          driverReport: snapshot.driver, environmentDate: snapshot.capturedAt, wasCancelled: wasCancelled))
         saveOutputs(snapshot: snapshot, results: rows, wasCancelled: wasCancelled)
@@ -286,14 +297,19 @@ final class RunLogRecorder {
         queue.async { self.persist { try self.session.event(message: "用户请求安全取消", phase: "cancel") } }
     }
 
-    func finish(cancelled: Bool) {
+    func driverMessage(_ message: String) {
+        guard !message.isEmpty else { return }
+        queue.async { self.persist { try self.session.event(message: String(message.prefix(8192)), phase: "driver-stderr") } }
+    }
+
+    func finish(cancelled: Bool, failed: Bool = false) {
         queue.sync {
-            do { try self.session.finish(reportJSON: self.report(cancelled: cancelled), cancelled: cancelled) }
+            do { try self.session.finish(reportJSON: self.report(cancelled: cancelled), cancelled: cancelled, failed: failed) }
             catch {
                 self.reportError(error)
                 // 完整快照保存失败时，仍尽力终结会话；不要把正常结束误记成进程中断。
                 self.persist { try self.session.event(message: "最后快照未完整保存，保留此前记录", phase: "log-error") }
-                self.persist { try self.session.finish(cancelled: cancelled) }
+                self.persist { try self.session.finish(cancelled: cancelled, failed: failed) }
             }
         }
     }

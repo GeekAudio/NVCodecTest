@@ -54,7 +54,7 @@ struct EnvProbeTests {
         check(report.state == .versionUnknown && report.version == nil, "plugin bundle version is not release version")
 
         facts = cleanEvidence()
-        facts.registeredEncoderIDs = ["com.nvmtl.videoencoder.h264"]
+        facts.registeredEncoderIDs = ["com.nvmtl.videoencoder.avc.nvenc"]
         facts.loadedProbeSucceeded = false
         facts.probeErrors = ["kmutil denied; kextstat denied"]
         report = EnvProbe.evaluateDriver(facts)
@@ -127,6 +127,12 @@ struct EnvProbeTests {
         // 大于 pipe 常见容量；验证探针不会因等待进程先退出而死锁。
         let large = EnvProbe.runCommand("/usr/bin/awk", ["BEGIN { for (i=0; i<12000; i++) print \"probe-output\" }"])
         check(large.succeeded && large.stdout.count > 100000, "large command output cannot block a pipe")
+        facts = cleanEvidence()
+        facts.registeredEncoderIDs = ["com.nvmtl.videoencoder.future.unreviewed"]
+        report = EnvProbe.evaluateDriver(facts)
+        check(!report.runtimeConfirmed, "unknown future encoder cannot prove core runtime")
+        check(report.state == .versionUnknown, "unknown registration remains an unconfirmed clue rather than absent")
+        check(!report.warnings.isEmpty && report.evidence.registeredEncoderIDs == facts.registeredEncoderIDs, "unknown ID is preserved with an explicit rule boundary")
         print("EnvProbe fixtures: \(checks) checks passed")
     }
 }

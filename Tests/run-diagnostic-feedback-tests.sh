@@ -23,9 +23,11 @@ swiftc -swift-version 5 -target "$(uname -m)-apple-macos11.0" \
 
 swiftc -swift-version 5 -target "$(uname -m)-apple-macos11.0" \
   "$DIAGNOSTIC_PROJECT_DIRECTORY/Sources/BenchModels.swift" \
+  "$DIAGNOSTIC_PROJECT_DIRECTORY/Sources/NullMothContract.swift" \
   "$DIAGNOSTIC_PROJECT_DIRECTORY/Sources/EnvProbe.swift" \
   "$DIAGNOSTIC_PROJECT_DIRECTORY/Sources/CodecBench.swift" \
   "$DIAGNOSTIC_PROJECT_DIRECTORY/Sources/DiagnosticLog.swift" \
+  "$DIAGNOSTIC_PROJECT_DIRECTORY/Sources/CodecWorker.swift" \
   "$DIAGNOSTIC_PROJECT_DIRECTORY/Sources/Reporting.swift" \
   "$DIAGNOSTIC_TEST_DIRECTORY/DiagnosticRecorderTests.swift" \
   -o "$DIAGNOSTIC_TEST_TEMP/diagnostic-recorder-tests" \

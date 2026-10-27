@@ -90,6 +90,8 @@ struct BenchOutcome {
     var nvidiaEvidence = ""
     var warningText = ""
     var errorText = ""
+    var failureStage: String?
+    var failureOSStatus: Int32?
     var usedEngine = ""
     var bytesPerFrame = 0
     var samples: [CMSampleBuffer] = []
@@ -122,6 +124,8 @@ struct BenchRow: Identifiable, Codable {
     let nvidiaEvidence: String
     let warningText: String
     let statistics: BenchStatistics?
+    let failureStage: String?
+    let failureOSStatus: Int32?
 
     /// 保留原有参数；新增证据均有默认值，旧调用不会因此产生 NVIDIA 结论。
     init(group: String, item: String, mode: String, ok: Bool, fps: Double,
@@ -130,7 +134,8 @@ struct BenchRow: Identifiable, Codable {
          gpuRegistryID: UInt64? = nil, gpuVendorID: UInt32? = nil,
          attribution: BenchAttribution = .unknown, isNVIDIAConfirmed: Bool = false,
          hardwareEvidence: String = "", gpuEvidence: String = "", nvidiaEvidence: String = "",
-         warningText: String = "", statistics: BenchStatistics? = nil) {
+         warningText: String = "", statistics: BenchStatistics? = nil,
+         failureStage: String? = nil, failureOSStatus: Int32? = nil) {
         self.group = group
         self.item = item
         self.mode = mode
@@ -151,6 +156,8 @@ struct BenchRow: Identifiable, Codable {
         self.nvidiaEvidence = nvidiaEvidence
         self.warningText = warningText
         self.statistics = statistics
+        self.failureStage = failureStage
+        self.failureOSStatus = failureOSStatus
     }
 }
 

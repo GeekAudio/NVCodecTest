@@ -4,6 +4,7 @@ import VideoToolbox
 import CoreVideo
 import IOKit
 import Darwin
+import MachO
 
 // MARK: - 一条环境信息
 
@@ -63,7 +64,7 @@ struct DriverReport: Codable {
     /// 只代表扩展已加载或编码器已注册；实际编解码成功仍须由会话测试确认。
     var runtimeConfirmed: Bool {
         evidence.loadedKexts.contains { EnvProbe.isCoreGraphicsKext($0.identifier) }
-            || !evidence.registeredEncoderIDs.isEmpty
+            || evidence.registeredEncoderIDs.contains { NullMothContract.encoderIDs.contains($0) }
     }
     var presenceConfirmed: Bool {
         runtimeConfirmed || !evidence.loadedKexts.isEmpty || evidence.markerPresent || !evidence.installedComponents.isEmpty
@@ -76,7 +77,7 @@ struct DriverReport: Codable {
         case .installed:
             return (evidence.loadedKexts.isEmpty ? "已安装，运行未确认" : "辅助组件已加载，核心运行未确认") + suffix
         case .versionUnknown:
-            return evidence.loadedKexts.isEmpty ? "发现安装证据，版本未知" : "辅助组件已加载，核心运行与版本未确认"
+            return evidence.loadedKexts.isEmpty ? "发现驱动线索，运行与版本待确认" : "辅助组件已加载，核心运行与版本未确认"
         case .notFound: return "未发现驱动证据"
         case .probeFailed: return "探测未完成"
         case .notApplicable: return "当前硬件无需 NullMoth"
@@ -252,13 +253,14 @@ enum EnvProbe {
             ?? loadedCore.first { $0.version != nil }
         let installedVersion = installed.first { $0.identifier == "com.nullmoth.NVRM" && $0.version != nil }
             ?? installed.first { $0.isKext && $0.identifier != "com.nullmoth.NVPrimarySelector" && $0.version != nil }
-        let runtime = !loadedCore.isEmpty || !evidence.registeredEncoderIDs.isEmpty
+        let runtime = !loadedCore.isEmpty || evidence.registeredEncoderIDs.contains { NullMothContract.encoderIDs.contains($0) }
         // 运行版本与磁盘版本不能混用。核心已加载但未提供版本时，明确保留未知。
         let version = runtime ? loadedVersion?.version : (installedVersion?.version ?? evidence.markerVersion)
         let source = runtime ? loadedVersion.map { "已加载 \($0.name)" }
             : (installedVersion.map { "磁盘 \($0.name)" } ?? evidence.markerVersion.map { _ in "driver-version 标记" })
         var warnings: [String] = []
-        let present = !loaded.isEmpty || runtime || evidence.markerPresent || !installed.isEmpty
+        let present = !loaded.isEmpty || runtime || evidence.markerPresent || !installed.isEmpty || !evidence.registeredEncoderIDs.isEmpty
+        if evidence.registeredEncoderIDs.contains(where: { !NullMothContract.encoderIDs.contains($0) }) { warnings.append("存在未纳入本次源码规则的编码器 ID，仅作存在性线索，不能单独确认核心驱动已运行") }
         if present && !evidence.markerPresent { warnings.append("缺少版本标记，但其他证据已确认驱动存在") }
         if let marker = evidence.markerVersion, let actual = loadedVersion?.version ?? installedVersion?.version,
            marker != actual { warnings.append("版本标记 \(marker) 与组件 \(actual) 不同，请核对安装或重启状态") }
@@ -283,18 +285,62 @@ enum EnvProbe {
                             evidence: evidence, warnings: warnings)
     }
 
+    static func pciNumber(_ value: Any?) -> UInt32? {
+        if let number = value as? NSNumber { return number.uint32Value }
+        guard let bytes = value as? Data, !bytes.isEmpty else { return nil }
+        return bytes.prefix(4).enumerated().reduce(UInt32(0)) { $0 | (UInt32($1.element) << ($1.offset * 8)) }
+    }
     static func nvidiaPCIPresent() -> Bool? {
         var iterator: io_iterator_t = 0
-        // MACH_PORT_NULL 让 IOKit 选默认端口，兼容 macOS 11 且不使用已弃用常量。
-        guard IOServiceGetMatchingServices(mach_port_t(0), IOServiceMatching("IOPCIDevice"), &iterator) == KERN_SUCCESS
-        else { return nil }
+        guard IOServiceGetMatchingServices(0, IOServiceMatching("IOPCIDevice"), &iterator) == KERN_SUCCESS else { return nil }
         defer { IOObjectRelease(iterator) }
+        var incomplete = false
         while case let service = IOIteratorNext(iterator), service != 0 {
-            let vendor = IORegistryEntryCreateCFProperty(service, "vendor-id" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Data
-            IOObjectRelease(service)
-            if let bytes = vendor, bytes.count >= 2, bytes[0] == 0xde, bytes[1] == 0x10 { return true }
+            defer { IOObjectRelease(service) }
+            guard let vendor = pciNumber(IORegistryEntryCreateCFProperty(service, "vendor-id" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue()), vendor == 0x10de else { continue }
+            guard let code = pciNumber(IORegistryEntryCreateCFProperty(service, "class-code" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue()) else { incomplete = true; continue }
+            if NullMothContract.isNVIDIADisplay(vendor: vendor, classCode: code) { return true }
         }
-        return false
+        return incomplete ? nil : false
+    }
+    static func videoRuntimeRows() -> [EnvRow] {
+        var rows: [EnvRow] = []
+        var iterator: io_iterator_t = 0
+        if IOServiceGetMatchingServices(0, IOServiceMatching("IOPCIDevice"), &iterator) == KERN_SUCCESS {
+            defer { IOObjectRelease(iterator) }
+            while case let service = IOIteratorNext(iterator), service != 0 {
+                defer { IOObjectRelease(service) }
+                func property(_ name: String) -> Any? { IORegistryEntryCreateCFProperty(service, name as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() }
+                guard let vendor = pciNumber(property("vendor-id")), let code = pciNumber(property("class-code")),
+                      NullMothContract.isNVIDIADisplay(vendor: vendor, classCode: code) else { continue }
+                var entryID: UInt64 = 0; IORegistryEntryGetRegistryEntryID(service, &entryID)
+                let device = pciNumber(property("device-id"))
+                let profile = property("nvrm-gpu-profile") as? [String: Any]
+                let generation = profile?["generation"] as? String
+                let layout = profile?["video-layout"] as? String
+                let name = profile?["chip"] as? String ?? "芯片未报告"
+                let fallback = layout == "blackwell"
+                let encoders = NullMothContract.encoderModules(generation: generation, blackwellFallback: fallback)
+                let identity = device.map { String(format: "10de:%04x", $0 & 0xffff) } ?? "10de:设备 ID 未报告"
+                let value = identity + " · " + name + " · " + (generation ?? "generation 未发布") + " · video-layout=" + (layout ?? "未发布")
+                let modules = encoders.isEmpty ? "上游选择器没有返回内置 NVENC 模块；不能据此判定硬件不支持" : encoders.joined(separator: "、")
+                rows.append(EnvRow("GPU profile \(entryID)", value, note: modules + "；此项是 PCI/驱动声明，实际可用性以会话为准。"))
+            }
+        }
+        var libraries: [String] = []
+        for index in 0..<_dyld_image_count() {
+            guard let name = _dyld_get_image_name(index) else { continue }
+            let path = String(cString: name), base = URL(fileURLWithPath: path).lastPathComponent
+            if base.hasPrefix("libnvdec_") || base.hasPrefix("libnvenc_") || base == "libnvencvt.dylib" { libraries.append(base) }
+        }
+        rows.append(EnvRow("视频库载入", libraries.isEmpty ? "当前进程未观察到 NVENC/NVDEC 库" : Array(Set(libraries)).sorted().joined(separator: " · "),
+                           note: "库已载入不等于注册成功，也不能单独证明本次会话的 GPU 归属。"))
+        let flags = NullMothContract.videoFlags.compactMap { key in ProcessInfo.processInfo.environment[key].map { key + "=" + $0 } }
+        rows.append(EnvRow("视频注册开关", flags.isEmpty ? "未设置所核对的进程环境开关" : flags.joined(separator: " · "),
+                           note: "仅记录上游列出的六个开关；不采集完整进程环境。"))
+        rows.append(EnvRow("检测规则依据", "NullMoth v2.6.2 · " + String(NullMothContract.commit.prefix(7)),
+                           note: NullMothContract.sourceURL + "；源码规则核对与实体显卡实测覆盖范围分开记录。"))
+        return rows
     }
 
     static func driverStatus(encoders: [EncoderRow]? = nil, encoderProbeSucceeded: Bool? = nil) -> DriverReport {
@@ -366,6 +412,7 @@ enum EnvProbe {
 
     static func captureEnvironment() -> EnvironmentSnapshot {
         var rows: [EnvRow] = []
+        let filePresence = NullMothContract.checkFiles()
         let os = ProcessInfo.processInfo.operatingSystemVersion
         let build = shell("/usr/bin/sw_vers", ["-buildVersion"])
         rows.append(EnvRow("系统", "macOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)" +
@@ -385,6 +432,8 @@ enum EnvProbe {
         let names = devices.map(\.name)
         rows.append(EnvRow("GPU", names.isEmpty ? (defaultDevice?.name ?? "无 Metal 设备") : names.joined(separator: " · "),
                            ok: !devices.isEmpty || defaultDevice != nil))
+        rows.append(EnvRow("组件文件存在性", filePresence.summary, note: "按所核对的源码版本检查路径上的文件是否存在；不读取文件内容。文件存在不单独证明驱动已加载、版本身份或硬件可用性。\n" + filePresence.details.joined(separator: "\n")))
+        rows += videoRuntimeRows()
         let encoders = probeEncoders()
         let driver = driverStatus(encoders: encoders.encoders, encoderProbeSucceeded: encoders.status == noErr)
         rows.append(EnvRow("NullMoth 驱动", driver.summary,

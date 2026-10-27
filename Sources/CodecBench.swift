@@ -98,6 +98,20 @@ enum CodecBench {
         }
     }
 
+    /// Report the actual VT error; these errors alone do not identify a hardware capability limit.
+    static func sessionCreationError(_ status: OSStatus, encoding: Bool) -> String {
+        let operation = encoding ? "编码" : "解码"
+        let reason: String
+        switch status {
+        case kVTCouldNotFindVideoEncoderErr: reason = "kVTCouldNotFindVideoEncoderErr：未找到符合请求的编码器"
+        case kVTCouldNotFindVideoDecoderErr: reason = "kVTCouldNotFindVideoDecoderErr：未找到符合请求的解码器"
+        case kVTVideoDecoderNotAvailableNowErr: reason = "kVTVideoDecoderNotAvailableNowErr：解码器当前不可用"
+        case kVTVideoEncoderNotAvailableNowErr: reason = "kVTVideoEncoderNotAvailableNowErr：编码器当前不可用"
+        default: reason = "VideoToolbox 未创建所请求的会话"
+        }
+        return "创建\(operation)会话失败 (\(status))；\(reason)；尚未提交帧，具体触发原因需结合驱动日志"
+    }
+
     private struct PropertyReading {
         let value: CFTypeRef?
         let status: OSStatus
@@ -122,9 +136,7 @@ enum CodecBench {
         return "\(key)=\(renderedValue ?? "返回值类型不符合此属性定义")（OSStatus=0）"
     }
 
-    private static let nvidiaEncoderIDs: Set<String> = [
-        "com.nvmtl.videoencoder.avc.nvenc", "com.nvmtl.videoencoder.hevc.nvenc",
-    ]
+    private static let nvidiaEncoderIDs = NullMothContract.encoderIDs
 
     private static func checkCancellation(_ token: BenchCancellation?, into out: inout BenchOutcome) -> Bool {
         guard token?.isCancelled == true else { return false }
@@ -231,7 +243,8 @@ enum CodecBench {
             gpuName: result.gpuName, gpuRegistryID: result.gpuRegistryID, gpuVendorID: result.gpuVendorID,
             attribution: result.attribution, isNVIDIAConfirmed: result.isNVIDIAConfirmed,
             hardwareEvidence: result.hardwareEvidence, gpuEvidence: result.gpuEvidence,
-            nvidiaEvidence: result.nvidiaEvidence, warningText: result.warningText, statistics: stats)
+            nvidiaEvidence: result.nvidiaEvidence, warningText: result.warningText, statistics: stats,
+            failureStage: result.failureStage, failureOSStatus: result.failureOSStatus)
     }
 
     /// 只用注册列表选择 ID，不硬编码 Apple 私有软件编码器名称。
@@ -299,7 +312,11 @@ enum CodecBench {
         out.format = sink.format
         out.bytesPerFrame = sink.bytes / max(out.frames, 1)
         var issues: [String] = []
-        if let first = sink.errors.first { issues.append("回调错误 \(first)（共 \(sink.errors.count) 次）") }
+        if let first = sink.errors.first {
+            issues.append("回调错误 \(first)（共 \(sink.errors.count) 次）")
+            out.failureStage = out.failureStage ?? "输出回调"
+            out.failureOSStatus = out.failureOSStatus ?? first
+        }
         if !sink.dropped.isEmpty { issues.append("丢帧 \(sink.dropped.count)") }
         if sink.invalidOutputs > 0 { issues.append("无效输出 \(sink.invalidOutputs)") }
         if sink.duplicateOutputs > 0 { issues.append("重复输出 \(sink.duplicateOutputs)") }
@@ -356,7 +373,8 @@ enum CodecBench {
             compressedDataAllocator: nil, outputCallback: nil, refcon: nil,
             compressionSessionOut: &session)
         guard status == noErr, let ses = session else {
-            out.errorText = "创建编码会话失败 (\(status))；可能不支持此格式、资源忙或编码器不可用"
+            out.errorText = sessionCreationError(status, encoding: true)
+            out.failureStage = "创建会话"; out.failureOSStatus = status
             return out
         }
         defer { VTCompressionSessionInvalidate(ses) }
@@ -563,7 +581,8 @@ enum CodecBench {
             imageBufferAttributes: attrs as CFDictionary, outputCallback: &record,
             decompressionSessionOut: &session)
         guard status == noErr, let ses = session else {
-            out.errorText = "创建解码会话失败 (\(status))；可能不支持此码流、资源忙或解码器不可用"
+            out.errorText = sessionCreationError(status, encoding: false)
+            out.failureStage = "创建会话"; out.failureOSStatus = status
             return out
         }
         defer { withExtendedLifetime(sink) { VTDecompressionSessionInvalidate(ses) } }

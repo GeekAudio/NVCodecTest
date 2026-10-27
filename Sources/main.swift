@@ -11,15 +11,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let m = TestModel()
         model = m
 
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 780),
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 670),
                            styleMask: [.titled, .closable, .miniaturizable, .resizable],
                            backing: .buffered, defer: false)
-        win.title = "NVIDIA 编解码诊断"
-        win.titlebarAppearsTransparent = false
+        win.title = "GPU Test"
+        win.titlebarAppearsTransparent = true
+        win.titleVisibility = .hidden
+        win.backgroundColor = NSColor(calibratedRed: 0.957, green: 0.961, blue: 0.953, alpha: 1)
+        win.appearance = NSAppearance(named: .aqua)
         win.contentView = NSHostingView(rootView: MainView(model: m))
-        win.setContentSize(NSSize(width: 960, height: 780))
-        win.contentMinSize = NSSize(width: 860, height: 640)
-        win.setFrameAutosaveName("NVCodecTestMain")
+        win.setContentSize(NSSize(width: 980, height: 670))
+        win.contentMinSize = NSSize(width: 960, height: 660)
+        win.setFrameAutosaveName("NVCodecTestOverviewTall-v141")
         win.center()
         win.makeKeyAndOrderFront(nil)
         window = win
@@ -28,11 +31,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let model, model.running else { return .terminateNow }
+        model.cancel()
+        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
+            if !model.running { timer.invalidate(); sender.reply(toApplicationShouldTerminate: true) }
+        }
+        return .terminateLater
+    }
 }
 
 // MARK: - 入口
 
 // Metal 与系统探测由 EnvProbe 在后台初始化；主窗口可以立即显示。
+
+if CommandLine.arguments.contains("--codec-worker") {
+    CodecWorker.run()
+    exit(0)
+}
 
 if CommandLine.arguments.contains("--help") {
     print("""
@@ -44,9 +61,9 @@ if CommandLine.arguments.contains("--help") {
       --snapshot <path.png>       离屏渲染界面
       --with-results              截图前运行完整矩阵
       --results-json <path.json>   用已保存报告渲染，无需重跑负载
-      --page <results|environment|methods> 选择截图页面
+      --page <results|environment|methods> 主仪表盘或详情弹窗截图
       --feedback                  截图日志与反馈预览（不打开网页）
-      --width <points> --height <points>   截图尺寸（默认 960×780）
+      --width <points> --height <points>   截图尺寸（默认 980×670）
     """)
     exit(0)
 }

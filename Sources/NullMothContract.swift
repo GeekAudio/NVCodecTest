@@ -1,0 +1,48 @@
+import Foundation
+
+/// Observable names and selection rules audited against the pinned upstream source.
+/// A module choice describes the driver's implementation, not a hardware capability verdict.
+enum NullMothContract {
+    static let commit = "6e375469bd02f5421a2a3d7c408507d5099e2c38"
+    static let sourceURL = "https://github.com/nullmoth/nvidia-macos-driver/blob/" + commit + "/plugin/NVMTLDevice.m"
+    static let encoderIDs: Set<String> = ["com.nvmtl.videoencoder.avc.nvenc", "com.nvmtl.videoencoder.hevc.nvenc"]
+    static let videoFiles = [
+        "NVMTLDriver", "libnvdec_h264.dylib", "libnvdec_h264_t2d.dylib", "libnvdec_hevc.dylib",
+        "libnvenc_h264.dylib", "libnvenc_h264_ga10x.dylib", "libnvenc_h264_tu10x.dylib",
+        "libnvenc_hevc.dylib", "libnvenc_hevc_ga10x.dylib", "libnvenc_hevc_tu10x.dylib"
+    ]
+    struct FilePresence {
+        var present = 0, missing = 0
+        var details: [String] = []
+        var summary: String { "磁盘 \(present)/\(present + missing) 项存在" }
+    }
+    static func checkFiles(root: URL = URL(fileURLWithPath: "/Library/GPUBundles/NVMTLDriver.bundle/Contents/MacOS"),
+                           names: [String] = videoFiles) -> FilePresence {
+        var result = FilePresence()
+        for name in names.sorted() {
+            var isDirectory: ObjCBool = false
+            let exists = FileManager.default.fileExists(atPath: root.appendingPathComponent(name).path, isDirectory: &isDirectory) && !isDirectory.boolValue
+            if exists { result.present += 1 } else { result.missing += 1 }
+            result.details.append(name + (exists ? "：存在" : "：缺失"))
+        }
+        return result
+    }
+    static let videoFlags = ["NVMTL_NO_NVDEC", "NVMTL_NO_NVDEC_HEVC", "NVMTL_NO_NVENC", "NVMTL_NO_NVENC_HEVC", "NVMTL_NVENCVT", "NVMTL_NVENCVT_RATING"]
+
+    static func isNVIDIADisplay(vendor: UInt32, classCode: UInt32) -> Bool {
+        vendor & 0xffff == 0x10de && classCode >> 16 == 0x03
+    }
+    static func generation(_ value: String, belongsTo family: String) -> Bool {
+        value == family || value.hasPrefix(family + " ")
+    }
+    static func encoderModules(generation value: String?, blackwellFallback: Bool) -> [String] {
+        guard let value else { return blackwellFallback ? ["libnvenc_h264.dylib", "libnvenc_hevc.dylib"] : [] }
+        if generation(value, belongsTo: "Blackwell") { return ["libnvenc_h264.dylib", "libnvenc_hevc.dylib"] }
+        if generation(value, belongsTo: "Ampere") { return ["libnvenc_h264_ga10x.dylib", "libnvenc_hevc_ga10x.dylib"] }
+        if generation(value, belongsTo: "Turing") { return ["libnvenc_h264_tu10x.dylib", "libnvenc_hevc_tu10x.dylib"] }
+        return []
+    }
+    static func decoderModules(blackwell: Bool) -> [String] {
+        [blackwell ? "libnvdec_h264.dylib" : "libnvdec_h264_t2d.dylib", "libnvdec_hevc.dylib"]
+    }
+}

@@ -60,7 +60,7 @@ final class TestModel: ObservableObject {
     @Published var diagnosticStore: DiagnosticLogStore?
     @Published var diagnosticLogError: String?
 
-    private var cancellation: BenchCancellation?
+    private var workerClient: CodecWorkerClient?
     private var activeLog: RunLogRecorder?
     private var refreshGeneration = UUID()
     private let recordsDiagnostics: Bool
@@ -142,8 +142,8 @@ final class TestModel: ObservableObject {
 
     func start() {
         guard canStart else { return }
-        let token = BenchCancellation()
-        cancellation = token
+        let client = CodecWorkerClient()
+        workerClient = client
         running = true
         finished = false
         cancelRequested = false
@@ -155,40 +155,39 @@ final class TestModel: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let log = self?.makeLog(existing: existingStore, kind: "完整测试")
             DispatchQueue.main.async { self?.activeLog = log }
-            let snapshot = EnvProbe.captureEnvironment()
-            log?.capture(snapshot)
-            DispatchQueue.main.async {
-                self?.applyEnvironment(snapshot)
-            }
-            _ = CodecBench.runAll(progress: { p, message in
-                log?.progress(p, message: message)
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    self.progress = self.cancelRequested ? min(self.progress, 0.99) : min(1, max(0, p))
-                    self.status = self.cancelRequested ? BenchCancellation.waitingDescription : message
+            let completion = client.run(onEvent: { event in
+                if let snapshot = event.environment {
+                    log?.capture(snapshot)
+                    DispatchQueue.main.async { self?.applyEnvironment(snapshot) }
                 }
-            }, onRow: { row in
-                log?.record(row)
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    if let index = self.results.firstIndex(where: { $0.id == row.id }) {
-                        self.results[index] = row
-                    } else {
-                        self.results.append(row)
+                if let p = event.progress, let message = event.message {
+                    log?.progress(p, message: message)
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        self.progress = self.cancelRequested ? min(self.progress, 0.99) : min(1, max(0, p))
+                        self.status = self.cancelRequested ? BenchCancellation.waitingDescription : message
                     }
                 }
-            }, cancellation: token)
-            log?.finish(cancelled: token.isCancelled)
+                if let row = event.row {
+                    log?.record(row)
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        if let index = self.results.firstIndex(where: { $0.id == row.id }) { self.results[index] = row }
+                        else { self.results.append(row) }
+                    }
+                }
+            }, onDiagnostic: { log?.driverMessage($0) })
+            log?.finish(cancelled: completion.cancelled, failed: !completion.complete && !completion.cancelled)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.running = false
-                self.wasCancelled = token.isCancelled
-                self.finished = !token.isCancelled
+                self.wasCancelled = completion.cancelled
+                self.finished = completion.complete && !completion.cancelled
                 self.cancelRequested = false
-                self.cancellation = nil
+                self.workerClient = nil
                 self.activeLog = nil
-                if !token.isCancelled { self.progress = 1 }
-                self.status = token.isCancelled ? "已取消，保留已完成的结果" : "本轮测试完成"
+                if completion.complete && !completion.cancelled { self.progress = 1 }
+                self.status = completion.message
             }
         }
     }
@@ -196,7 +195,7 @@ final class TestModel: ObservableObject {
     func cancel() {
         guard running && !cancelRequested else { return }
         cancelRequested = true
-        cancellation?.cancel()
+        workerClient?.cancel()
         activeLog?.requestCancellation()
         status = BenchCancellation.waitingDescription
     }

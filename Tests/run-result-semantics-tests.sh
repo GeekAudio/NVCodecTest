@@ -9,9 +9,11 @@ RESULT_TEST_TEMP="$(mktemp -d "${TMPDIR:-/tmp}/nvcodec-result-tests.XXXXXX")"
 trap 'rm -rf "$RESULT_TEST_TEMP"' EXIT
 swiftc -swift-version 5 -target "$(uname -m)-apple-macos11.0" \
   "$RESULT_PROJECT_DIRECTORY/Sources/BenchModels.swift" \
+  "$RESULT_PROJECT_DIRECTORY/Sources/NullMothContract.swift" \
   "$RESULT_PROJECT_DIRECTORY/Sources/EnvProbe.swift" \
   "$RESULT_PROJECT_DIRECTORY/Sources/CodecBench.swift" \
   "$RESULT_PROJECT_DIRECTORY/Sources/DiagnosticLog.swift" \
+  "$RESULT_PROJECT_DIRECTORY/Sources/CodecWorker.swift" \
   "$RESULT_PROJECT_DIRECTORY/Sources/Reporting.swift" \
   "$RESULT_TEST_DIRECTORY/ResultSemanticsTests.swift" \
   -o "$RESULT_TEST_TEMP/result-semantics-tests" \
