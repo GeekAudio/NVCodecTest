@@ -6,8 +6,8 @@ struct DetailField: View {
     let value: String
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.system(size: 11, weight: .semibold)).foregroundColor(.sub)
-            Text(value.isEmpty ? "未提供" : value).font(.system(size: 12)).foregroundColor(.txt)
+            Text(title).font(DesignTokens.Font.small.weight(.semibold)).foregroundColor(DesignTokens.Text.secondary)
+            Text(value.isEmpty ? "未提供" : value).font(DesignTokens.Font.body).foregroundColor(DesignTokens.Text.primary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -29,15 +29,16 @@ struct ResultDetails: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("\(row.group) · \(row.item)").font(.system(size: 18, weight: .semibold))
-                    Text("\(row.mode) · \(row.status.rawValue)").font(.system(size: 12)).foregroundColor(.sub)
+                    Text("\(row.group) · \(row.item)").font(DesignTokens.Font.title1.weight(.semibold))
+                    Text("\(row.mode) · \(row.status.rawValue)").font(DesignTokens.Font.body).foregroundColor(DesignTokens.Text.primary)
                 }
                 Spacer()
                 Button("完成") { presentationMode.wrappedValue.dismiss() }.keyboardShortcut(.defaultAction)
+                    .buttonStyle(NativeButtonStyle(prominent: true))
             }.padding(20)
-            Divider()
+            Hairline()
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 16) {
                     DetailField(title: "实际引擎", value: row.engine)
                     if let code = row.failureOSStatus {
                         DetailField(title: "失败阶段 / OSStatus", value: (row.failureStage ?? "未提供阶段") + " · \(code)")
@@ -60,10 +61,10 @@ struct ResultDetails: View {
                     DetailField(title: "完整详情 / 错误", value: row.detail)
                 }.padding(20)
             }
-            Divider()
+            Hairline()
             HStack {
                 Text("FPS 为本合成负载结果；编码对照未匹配输出画质。")
-                    .font(.system(size: 10.5)).foregroundColor(.sub)
+                    .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary)
                 Spacer()
                 Button("复制详情") {
                     NSPasteboard.general.clearContents()
@@ -71,5 +72,9 @@ struct ResultDetails: View {
                 }
             }.padding(16)
         }.frame(width: 660, height: 620)
+            .font(DesignTokens.Font.body).lineSpacing(2)
+            .foregroundColor(DesignTokens.Text.primary)
+            .background(DesignTokens.Surface.window)
+            .buttonStyle(NativeButtonStyle(prominent: false))
     }
 }

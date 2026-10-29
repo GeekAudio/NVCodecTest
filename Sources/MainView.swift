@@ -17,62 +17,63 @@ struct MainView: View {
     }
     private var selected: BenchRow? { model.results.first { $0.id == selectedID } }
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             header
             TestOverview(rows: model.results, completed: model.completedCount, total: model.totalCases,
-                         finished: model.finished, cancelled: model.wasCancelled)
-            HStack(alignment: .top, spacing: 10) {
+                         finished: model.finished, cancelled: model.wasCancelled).frame(height: 60)
+            HStack(alignment: .top, spacing: 12) {
                 matrix.frame(maxWidth: .infinity, maxHeight: .infinity)
                 environment.frame(width: 232).frame(maxHeight: .infinity)
             }.frame(minHeight: 352, maxHeight: .infinity)
             selectedEvidence.frame(height: 60)
             footer
         }
-        .padding(16)
-        .frame(minWidth: 960, minHeight: 660)
-        .background(Color.codecBackground).foregroundColor(.txt).accentColor(.codecAccent)
-        .preferredColorScheme(.light)
+        .padding(20)
+        .frame(minWidth: 840, minHeight: 660)
+        .background(Color.codecBackground).font(DesignTokens.Font.body).lineSpacing(2)
+        .foregroundColor(.txt).accentColor(.codecAccent)
+
         .sheet(item: $sheet) { item in
             switch item {
             case .environment: DetailWindow(title: "完整环境与驱动证据") { EnvironmentEvidenceContent(model: model) }
             case .methods: DetailWindow(title: "测量方法") { MeasurementMethodsView() }
-            case .result(let row): ResultDetails(row: row).background(Color.codecBackground).preferredColorScheme(.light)
+            case .result(let row): ResultDetails(row: row).background(Color.codecBackground)
             case .feedback:
                 FeedbackView(refreshHistory: model.feedbackHistoryLoader(), deleteDiagnostic: { try model.deleteDiagnostic($0) },
                              clearHistory: { try model.diagnosticStore?.clear() }, storageNotice: model.diagnosticLogError)
-                    .preferredColorScheme(.light)
+
             }
         }
     }
     private var header: some View {
         HStack(spacing: 12) {
-            Image(systemName: "play.rectangle").font(.system(size: 19, weight: .regular)).foregroundColor(.codecAccent)
-            Text("GPU Test").font(.system(size: 21, weight: .semibold))
-            Text("视频编解码诊断").font(.system(size: 10.5)).foregroundColor(.sub)
+            Image(systemName: "play.rectangle").font(DesignTokens.Font.title2).foregroundColor(.codecAccent)
+            Text("GPU Test").font(DesignTokens.Font.title2)
+            Text("视频编解码诊断").font(DesignTokens.Font.small).foregroundColor(.sub)
             Spacer(minLength: 12)
             Button(action: model.refresh) { Label("刷新环境", systemImage: "arrow.clockwise") }
-                .buttonStyle(MutedButtonStyle()).disabled(model.running || model.refreshing)
+                .buttonStyle(NativeButtonStyle()).disabled(model.running || model.refreshing)
                 .help("重新采集环境并清空本轮结果")
             if model.running {
                 Button(action: { model.cancel() }) {
                     Label(model.cancelRequested ? "等待安全取消…" : "取消测试", systemImage: "stop.fill")
-                }.buttonStyle(MutedButtonStyle()).disabled(model.cancelRequested)
+                }.buttonStyle(NativeButtonStyle()).disabled(model.cancelRequested)
                     .keyboardShortcut(".", modifiers: .command)
             } else {
                 Button(action: model.start) {
                     Label(model.tested ? "重新测试" : "开始完整测试", systemImage: "play.fill")
-                }.buttonStyle(MutedButtonStyle(prominent: true)).disabled(!model.canStart)
+                }.buttonStyle(NativeButtonStyle(prominent: true)).disabled(!model.canStart)
                     .keyboardShortcut(.return, modifiers: .command)
             }
-        }.frame(height: 36)
+        }.frame(height: 28)
     }
     private var matrix: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("编解码测试").font(.system(size: 13, weight: .semibold))
+                Text("编解码测试").font(DesignTokens.Font.title3)
                 Spacer()
-                Text("6 项编码 · 3 项解码").font(.system(size: 9)).foregroundColor(.sub)
-            }.frame(height: 22)
+                Text("6 项编码 · 3 项解码").font(DesignTokens.Font.small).foregroundColor(.sub)
+            }.frame(height: 20)
             caseCards(Array(plannedRows.prefix(3)))
             caseCards(Array(plannedRows.dropFirst(3).prefix(3)))
             caseCards(Array(plannedRows.suffix(3)))
@@ -90,9 +91,9 @@ struct MainView: View {
         }.frame(maxHeight: .infinity)
     }
     private var environment: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("本机环境").font(.system(size: 13, weight: .semibold))
+                Text("本机环境").font(DesignTokens.Font.title3)
                 Spacer()
                 if model.refreshing { ProgressView().scaleEffect(0.55).frame(width: 14, height: 14) }
             }
@@ -101,47 +102,50 @@ struct MainView: View {
             environmentField("CPU", model.env.first { $0.key == "CPU" }?.value ?? "正在读取…", lines: 2)
             environmentField("系统", model.env.first { $0.key == "系统" }?.value ?? "正在读取…", lines: 1)
             HStack {
-                Text("NVENC 注册").font(.system(size: 10)).foregroundColor(.sub)
+                Text("NVENC 注册").font(DesignTokens.Font.small).foregroundColor(.sub)
                 Spacer()
-                Text("\(model.nvidiaEncoders.count) 个注册").font(.system(size: 10, weight: .medium))
+                Text("\(model.nvidiaEncoders.count) 个注册").font(DesignTokens.Font.body)
             }
             environmentField("组件文件", model.env.first { $0.key == "组件文件存在性" }?.value ?? (model.refreshing ? "正在核对…" : "本报告未记录"), lines: 2)
             Spacer(minLength: 0)
-            Button("完整环境与编码器…") { sheet = .environment }.buttonStyle(MutedButtonStyle())
-        }.modifier(PanelStyle())
+            Button("完整环境与编码器…") { sheet = .environment }.buttonStyle(NativeButtonStyle())
+        }.padding(12)
+            .background(NativeMaterial(material: .sidebar, blendingMode: .behindWindow))
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.corner))
+            .overlay(HStack(spacing: 0) { Hairline(axis: .vertical); Spacer(minLength: 0) })
     }
     private func environmentField(_ title: String, _ value: String, lines: Int) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.system(size: 9.5)).foregroundColor(.sub)
-            Text(value).font(.system(size: 10.5, weight: .medium)).lineLimit(lines).help(value)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(DesignTokens.Font.small).foregroundColor(.sub)
+            Text(value).font(DesignTokens.Font.body).foregroundColor(.txt).lineLimit(lines).help(value)
         }
     }
     private var selectedEvidence: some View {
-        HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 5) {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(selected.map { $0.group + " · " + $0.item + " · " + $0.mode } ?? "选中项目的验证依据")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(DesignTokens.Font.body.weight(.semibold))
                 Text(selected.map { !$0.ok || $0.engine.isEmpty || $0.engine == "—" ? $0.detail : $0.engine + " · " + ($0.nvidiaEvidence.isEmpty ? $0.hardwareEvidence : $0.nvidiaEvidence) }
                      ?? "点击卡片查看实际引擎与设备归属；完整证据在详情弹窗中。")
-                    .font(.system(size: 10)).foregroundColor(.sub).lineLimit(2)
+                    .font(DesignTokens.Font.small).foregroundColor(.sub).lineLimit(2)
             }
             Spacer(minLength: 8)
             if let row = selected, row.ok, row.hardwareAccelerated == true,
                let software = model.results.first(where: { $0.group == row.group && $0.item == row.item && ResultCategory.software.includes($0) }), software.fps > 0 {
                 Text(String(format: "本负载 %.2f× 软件", row.fps / software.fps))
-                    .font(.system(size: 10)).foregroundColor(.sub)
+                    .font(DesignTokens.Font.small).foregroundColor(.sub)
             }
             Button("证据与详情…") { if let selected { sheet = .result(selected) } }
-                .buttonStyle(MutedButtonStyle()).disabled(selected == nil)
-        }.modifier(PanelStyle(padding: 10))
+                .buttonStyle(NativeButtonStyle()).disabled(selected == nil)
+        }.modifier(PanelStyle(padding: 8))
     }
     private var footer: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 10) {
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
                 Text(model.status.isEmpty ? "预热后测量三次，取中位数；软件 HEVC 对照可能需要几分钟。" : model.status)
-                    .font(.system(size: 10)).foregroundColor(.sub).lineLimit(1).help(model.status)
+                    .font(DesignTokens.Font.small).foregroundColor(.sub).lineLimit(1).help(model.status)
                 Spacer(minLength: 0)
-                if model.running { Text(String(format: "%.0f%%", model.progress * 100)).font(.system(size: 10, design: .monospaced)).foregroundColor(.sub) }
+                if model.running { Text(String(format: "%.0f%%", model.progress * 100)).font(DesignTokens.Font.small.monospacedDigit()).foregroundColor(.sub) }
             }
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
@@ -151,18 +155,18 @@ struct MainView: View {
             }.frame(height: 4)
                 .accessibilityElement().accessibilityLabel(Text("测试进度"))
                 .accessibilityValue(Text(String(format: "%.0f%%", model.progress * 100)))
-            HStack(spacing: 14) {
-                Button("测量方法") { sheet = .methods }.buttonStyle(PlainButtonStyle()).foregroundColor(.systemBlue)
-                Button("日志与反馈") { sheet = .feedback }.buttonStyle(PlainButtonStyle()).foregroundColor(.systemBlue)
+            HStack(spacing: 12) {
+                Button("测量方法") { sheet = .methods }.buttonStyle(NativeButtonStyle())
+                Button("日志与反馈") { sheet = .feedback }.buttonStyle(NativeButtonStyle())
                 Text(model.diagnosticLogError == nil ? "日志仅存本机 · 反馈前可预览" : "日志留存异常，点击反馈查看")
-                    .font(.system(size: 9)).foregroundColor(.sub).lineLimit(1)
+                    .font(DesignTokens.Font.small).foregroundColor(.sub).lineLimit(1)
                 Spacer(minLength: 0)
                 Menu {
                     Button("导出文本 TXT") { model.exportReport() }
                     Button("导出完整 JSON") { model.exportReport(asJSON: true) }
                 } label: { Label(model.results.isEmpty ? "导出环境" : "导出报告", systemImage: "square.and.arrow.up") }
                     .fixedSize().disabled(!model.canExport)
-            }.font(.system(size: 10.5))
+            }.font(DesignTokens.Font.small)
         }.frame(height: 54)
     }
 }

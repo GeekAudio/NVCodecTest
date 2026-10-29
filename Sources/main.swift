@@ -11,19 +11,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let m = TestModel()
         model = m
 
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 670),
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 670),
                            styleMask: [.titled, .closable, .miniaturizable, .resizable],
                            backing: .buffered, defer: false)
         win.title = "GPU Test"
-        win.titlebarAppearsTransparent = true
-        win.titleVisibility = .hidden
-        win.backgroundColor = NSColor(calibratedRed: 0.957, green: 0.961, blue: 0.953, alpha: 1)
-        win.appearance = NSAppearance(named: .aqua)
+        win.titlebarAppearsTransparent = false
+        win.titleVisibility = .visible
+        win.toolbarStyle = .unified
+        win.backgroundColor = .windowBackgroundColor
+        win.appearance = nil
         win.contentView = NSHostingView(rootView: MainView(model: m))
-        win.setContentSize(NSSize(width: 980, height: 670))
-        win.contentMinSize = NSSize(width: 960, height: 660)
-        win.setFrameAutosaveName("NVCodecTestOverviewTall-v141")
-        win.center()
+        win.setContentSize(NSSize(width: 860, height: 670))
+        win.contentMinSize = NSSize(width: 840, height: 660)
+        let autosaveName = "NVCodecTestOverviewNarrow-v141"
+        win.setFrameAutosaveName(autosaveName)
+        if !win.setFrameUsingName(autosaveName) { win.center() }
         win.makeKeyAndOrderFront(nil)
         window = win
 
@@ -63,7 +65,13 @@ if CommandLine.arguments.contains("--help") {
       --results-json <path.json>   用已保存报告渲染，无需重跑负载
       --page <results|environment|methods> 主仪表盘或详情弹窗截图
       --feedback                  截图日志与反馈预览（不打开网页）
-      --width <points> --height <points>   截图尺寸（默认 980×670）
+      --width <points> --height <points>   截图尺寸（默认 860×670）
+      --dark | --light           截图使用深色或浅色（默认跟随系统）
+      --inactive                 截图模拟窗口失焦、选择项保持选中
+      --scale <1|2>              截图像素倍率（默认 2，供细线核验）
+      --focus-preview            截图前将焦点移入原生键盘导航链
+      --focus-step <1...30>      快照中前进到第几个原生焦点（隐含focus-preview）
+      --window-frame             截图包含原生标题栏（默认只截内容区）
     """)
     exit(0)
 }
