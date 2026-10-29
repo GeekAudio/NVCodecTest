@@ -6,6 +6,12 @@ enum NullMothContract {
     static let commit = "6e375469bd02f5421a2a3d7c408507d5099e2c38"
     static let sourceURL = "https://github.com/nullmoth/nvidia-macos-driver/blob/" + commit + "/plugin/NVMTLDevice.m"
     static let encoderIDs: Set<String> = ["com.nvmtl.videoencoder.avc.nvenc", "com.nvmtl.videoencoder.hevc.nvenc"]
+
+    /// 广义 NVENC 编码器识别：NullMoth 原生插件（com.nvmtl.videoencoder.*）+ mickys 用户态桥（org.nvenc.videoencoder.*）。
+    /// 仅用于「编码器注册」统计；不用于 NullMoth 原生插件身份确认（后者只认 encoderIDs）。
+    static func isNVENCVideoEncoder(_ id: String) -> Bool {
+        id.hasPrefix("com.nvmtl.videoencoder.") || id.hasPrefix("org.nvenc.videoencoder.")
+    }
     static let videoFiles = [
         "NVMTLDriver", "libnvdec_h264.dylib", "libnvdec_h264_t2d.dylib", "libnvdec_hevc.dylib",
         "libnvenc_h264.dylib", "libnvenc_h264_ga10x.dylib", "libnvenc_h264_tu10x.dylib",
