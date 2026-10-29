@@ -101,7 +101,7 @@ struct MainView: View {
             environmentField("CPU", model.env.first { $0.key == "CPU" }?.value ?? "正在读取…", lines: 2)
             environmentField("系统", model.env.first { $0.key == "系统" }?.value ?? "正在读取…", lines: 1)
             HStack {
-                Text("NVIDIA 编码器").font(.system(size: 10)).foregroundColor(.sub)
+                Text("NVENC 注册").font(.system(size: 10)).foregroundColor(.sub)
                 Spacer()
                 Text("\(model.nvidiaEncoders.count) 个注册").font(.system(size: 10, weight: .medium))
             }

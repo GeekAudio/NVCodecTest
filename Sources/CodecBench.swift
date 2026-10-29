@@ -177,31 +177,51 @@ enum CodecBench {
                 renderedValue: out.encoderID.isEmpty ? nil : out.encoderID)
         }
         let gpuReading = property(session, gpuKey)
-        out.gpuRegistryID = (gpuReading.value as? NSNumber)?.uint64Value
+        let registryID = (gpuReading.value as? NSNumber)?.uint64Value
         out.gpuEvidence = propertyEvidence(gpuReading, key: gpuKey,
-            renderedValue: out.gpuRegistryID.map(String.init))
-        // 回退：VT 内部键 "UsingMetalRegistryID" 不转发第三方插件（NullMoth 答不了），
-        // 当会话未报告 GPU 时，改枚举 Metal 设备，取 vendor-id == 0x10de 的 NVIDIA GPU 作为归属证据。
-        var registryID = out.gpuRegistryID
-        if registryID == nil,
-           let nvidia = MTLCopyAllDevices().first(where: { vendorID(registryID: $0.registryID) == 0x10de }) {
-            registryID = nvidia.registryID
-            out.gpuRegistryID = nvidia.registryID
-            out.gpuEvidence += "；VT 会话未报告 GPU（内部键），回退为系统内 NVIDIA Metal 设备 \(nvidia.name)"
+            renderedValue: registryID.map(String.init))
+        let sessionVendor = registryID.flatMap { vendorID(registryID: $0) }
+        let devices = MTLCopyAllDevices().map { device in
+            GPUDeviceIdentity(registryID: device.registryID, name: device.name,
+                              vendorID: registryID == nil ? vendorID(registryID: device.registryID) : nil)
         }
-        guard let rid = registryID else {
+        applySessionGPUIdentity(registryID: registryID, vendorID: sessionVendor,
+                                availableDevices: devices, into: &out)
+    }
+
+    struct GPUDeviceIdentity {
+        let registryID: UInt64
+        let name: String
+        let vendorID: UInt32?
+    }
+
+    /// 只有 VT 会话报告的 Registry ID 能填入会话字段；系统枚举仅补充环境候选。
+    /// 独立纯函数同时用于正式捕获与无 GPU fixture，防止候选在后续确认逻辑中被升格。
+    static func applySessionGPUIdentity(registryID: UInt64?, vendorID: UInt32?,
+                                        availableDevices: [GPUDeviceIdentity], into out: inout BenchOutcome) {
+        // 创建/结束时会各查询一次；后一次缺失身份时不能残留前一次的 vendor/name。
+        out.gpuRegistryID = registryID
+        out.gpuName = ""
+        out.gpuVendorID = nil
+        guard let registryID else {
             out.gpuEvidence += "；GPU 归属未知；仅当属性查询成功且为空时，官方定义允许内置硬件或软件"
+            let candidates = availableDevices.filter { $0.vendorID == 0x10de }
+                .sorted { $0.registryID < $1.registryID }
+            if !candidates.isEmpty {
+                out.gpuEvidence += "；系统可见 NVIDIA 候选设备：" + candidates.map(\.name).joined(separator: "、")
+                    + "。设备枚举只证明系统存在该设备，不证明本次会话使用它"
+            }
             return
         }
-        out.gpuName = MTLCopyAllDevices().first { $0.registryID == rid }?.name ?? ""
-        out.gpuVendorID = vendorID(registryID: rid)
+        out.gpuName = availableDevices.first { $0.registryID == registryID }?.name ?? ""
+        out.gpuVendorID = vendorID
         if !out.gpuName.isEmpty { out.gpuEvidence += "；匹配 Metal 设备 \(out.gpuName)" }
         else { out.gpuEvidence += "；未匹配到 Metal 设备" }
         if let vendor = out.gpuVendorID { out.gpuEvidence += String(format: "；IORegistry PCI vendor-id=0x%04x", vendor) }
         else { out.gpuEvidence += "；PCI vendor-id 未读取到，设备名称仅作说明" }
     }
 
-    private static func finalizeAttribution(_ out: inout BenchOutcome, softwareRequested: Bool = false) {
+    static func finalizeAttribution(_ out: inout BenchOutcome, softwareRequested: Bool = false) {
         out.isNVIDIAConfirmed = false
         if out.hardwareAccelerated == false || (softwareRequested && out.hardwareAccelerated == nil) {
             out.attribution = .software
