@@ -98,7 +98,7 @@ struct FeedbackView: View {
             Hairline()
             HStack(alignment: .top, spacing: 0) {
                 historySidebar.frame(width: 200)
-                    .background(NativeMaterial(material: .sidebar, blendingMode: .withinWindow))
+                    .background(SidebarSurface(blendingMode: .withinWindow))
                 Hairline(axis: .vertical)
                 feedbackBody.padding(20)
             }

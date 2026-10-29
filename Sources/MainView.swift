@@ -110,7 +110,7 @@ struct MainView: View {
             Spacer(minLength: 0)
             Button("完整环境与编码器…") { sheet = .environment }.buttonStyle(NativeButtonStyle())
         }.padding(12)
-            .background(NativeMaterial(material: .sidebar, blendingMode: .behindWindow))
+            .background(SidebarSurface())
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.corner))
             .overlay(HStack(spacing: 0) { Hairline(axis: .vertical); Spacer(minLength: 0) })
     }

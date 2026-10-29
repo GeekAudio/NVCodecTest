@@ -16,6 +16,7 @@ struct DesignTokens {
         static var content: Color { Color(.controlBackgroundColor) }
         static var control: Color { Color(.controlBackgroundColor) }
         static var inset: Color { Color(.underPageBackgroundColor) }
+        static var sidebarTint: Color { window.opacity(0.60) }
     }
     enum Stroke {
         static var separator: Color { Color(.separatorColor) }
@@ -67,6 +68,17 @@ struct NativeMaterial: NSViewRepresentable {
         view.material = material
         view.blendingMode = blendingMode
         view.state = .followsWindowActiveState
+    }
+}
+
+/// Retain the native material while bringing its luminance closer to the window.
+struct SidebarSurface: View {
+    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+    var body: some View {
+        ZStack {
+            NativeMaterial(material: .sidebar, blendingMode: blendingMode)
+            DesignTokens.Surface.sidebarTint
+        }.allowsHitTesting(false).accessibilityHidden(true)
     }
 }
 
