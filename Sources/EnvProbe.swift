@@ -61,7 +61,7 @@ struct DriverReport: Codable {
     let evidence: DriverEvidence
     let warnings: [String]
 
-    /// 只代表扩展已加载或编码器已注册；实际编解码成功仍须由会话测试确认。
+    /// 只代表核心扩展已加载或已审计的原生编码器已注册；桥接注册不确认核心运行。
     var runtimeConfirmed: Bool {
         evidence.loadedKexts.contains { EnvProbe.isCoreGraphicsKext($0.identifier) }
             || evidence.registeredEncoderIDs.contains { NullMothContract.encoderIDs.contains($0) }
@@ -98,7 +98,7 @@ struct DriverReport: Codable {
             }.joined(separator: "、"))
         }
         if !evidence.registeredEncoderIDs.isEmpty {
-            parts.append("已注册 \(evidence.registeredEncoderIDs.count) 个 NVMTL 编码器；可用性以实测为准")
+            parts.append("已注册 \(evidence.registeredEncoderIDs.count) 个 NVENC 编码器（原生或桥接）；可用性以实测为准")
         }
         if state == .installed || state == .versionUnknown {
             parts.append("安装文件或标记不代表驱动当前已运行")
@@ -260,8 +260,12 @@ enum EnvProbe {
             : (installedVersion.map { "磁盘 \($0.name)" } ?? evidence.markerVersion.map { _ in "driver-version 标记" })
         var warnings: [String] = []
         let present = !loaded.isEmpty || runtime || evidence.markerPresent || !installed.isEmpty || !evidence.registeredEncoderIDs.isEmpty
-        if evidence.registeredEncoderIDs.contains(where: { !NullMothContract.encoderIDs.contains($0) }) { warnings.append("存在未纳入本次源码规则的编码器 ID，仅作存在性线索，不能单独确认核心驱动已运行") }
-        if present && !evidence.markerPresent { warnings.append("缺少版本标记，但其他证据已确认驱动存在") }
+        if evidence.registeredEncoderIDs.contains(where: { !NullMothContract.encoderIDs.contains($0) }) { warnings.append("存在原生身份白名单以外的编码器 ID，仅作注册线索，不能单独确认 NullMoth 核心驱动已运行") }
+        if present && !evidence.markerPresent {
+            warnings.append(runtime || !loaded.isEmpty || !installed.isEmpty
+                ? "缺少版本标记，但其他证据已确认驱动存在"
+                : "缺少版本标记；已发现 NVENC 注册线索，NullMoth 安装与核心运行尚未确认")
+        }
         if let marker = evidence.markerVersion, let actual = loadedVersion?.version ?? installedVersion?.version,
            marker != actual { warnings.append("版本标记 \(marker) 与组件 \(actual) 不同，请核对安装或重启状态") }
         for kext in loaded {
@@ -396,12 +400,12 @@ enum EnvProbe {
         if !evidence.loadedProbeSucceeded { evidence.probeErrors.append("加载状态无法读取（" + loadFailures.joined(separator: "；") + "）") }
         if let encoders = encoders {
             evidence.encoderProbeSucceeded = encoderProbeSucceeded ?? true
-            evidence.registeredEncoderIDs = encoders.map(\.encoderID).filter { $0.hasPrefix("com.nvmtl.") }
+            evidence.registeredEncoderIDs = encoders.map(\.encoderID).filter { NullMothContract.isNVENCVideoEncoder($0) }
             if !evidence.encoderProbeSucceeded { evidence.probeErrors.append("当前进程编码器枚举失败") }
         } else {
             let probe = probeEncoders()
             evidence.encoderProbeSucceeded = probe.status == noErr
-            evidence.registeredEncoderIDs = probe.encoders.map(\.encoderID).filter { $0.hasPrefix("com.nvmtl.") }
+            evidence.registeredEncoderIDs = probe.encoders.map(\.encoderID).filter { NullMothContract.isNVENCVideoEncoder($0) }
             if probe.status != noErr { evidence.probeErrors.append("编码器枚举失败：OSStatus \(probe.status)") }
         }
         return evaluateDriver(evidence)
@@ -445,7 +449,7 @@ enum EnvProbe {
         let plugins = driver.evidence.installedComponents.filter { !$0.isKext }
         rows.append(EnvRow("NVMTL 插件", plugins.isEmpty ? "未发现磁盘插件" : plugins.map { $0.name + " " + ($0.version ?? "版本未知") }.joined(separator: " · "),
                            ok: true, note: "插件 bundle 版本独立于驱动发行版本"))
-        rows.append(EnvRow("NVMTL 编码器", encoders.status == noErr
+        rows.append(EnvRow("NVENC 编码器", encoders.status == noErr
                            ? (driver.evidence.registeredEncoderIDs.isEmpty ? "当前进程未注册" : driver.evidence.registeredEncoderIDs.joined(separator: " · "))
                            : "枚举失败（OSStatus \(encoders.status)）", ok: encoders.status == noErr,
                            note: "注册仅证明编码器可被枚举；硬件归属与可用性以实际会话为准"))
@@ -467,9 +471,9 @@ enum EnvProbe {
                                    decoderCaps: decoderCaps(), capturedAt: Date())
     }
 
-    /// 当前进程是否已被 NVMTL 插件注册了编码器
+    /// 当前进程是否注册了已审计的 NVMTL 原生编码器；桥接不属于此判断。
     static func nvmtlEncodersRegistered() -> Bool {
-        for e in encoderList() where e.encoderID.hasPrefix("com.nvmtl.") { return true }
+        for e in encoderList() where NullMothContract.encoderIDs.contains(e.encoderID) { return true }
         return false
     }
 

@@ -47,6 +47,7 @@ v1.4.1 使用低饱和度浅色单页仪表盘。主窗口不滚动、不分页�
 ./Tests/run-diagnostic-feedback-tests.sh
 ./Tests/run-source-contract-tests.sh
 ./Tests/run-worker-tests.sh
+./Tests/run-session-evidence-tests.sh
 ```
 
 App 包含 Intel 和 Apple Silicon 两种架构。NVIDIA / NullMoth 检测主要给 Intel 黑苹果用；Apple Silicon 可以测系统编解码器作为对照。
