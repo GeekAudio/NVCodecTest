@@ -205,13 +205,14 @@ struct FeedbackView: View {
             Text("最近 20 次 · 最长 30 天 · 仅存本机。运行中的记录可能尚无完整报告；此处读取已落盘内容。")
                 .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Menu("管理本机记录") {
+            Menu {
                 Button("删除所选记录…") {
                     if let id = selected?.id { activeAlert = .delete(id) }
                 }.disabled(!canDeleteSelected)
                 Button("清空可删除的历史记录…") { activeAlert = .clear }
                     .disabled(clearHistory == nil || !historyItems.contains { $0.isLocalRecord })
-            }.disabled(loading)
+            } label: { Text("管理本机记录").foregroundColor(DesignTokens.Text.secondary) }
+                .modifier(NativeMenuStyle()).disabled(loading)
         }.padding(16)
     }
 
@@ -276,7 +277,7 @@ struct FeedbackView: View {
             Text(operationNotice.isEmpty ? "无后台传输 · 无需维护者 Token" : operationNotice)
                 .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.primary).lineLimit(2)
             Spacer()
-            Menu("导出…") {
+            Menu {
                 Button("网页草稿 TXT（与网页预览一致）") { exportDraft(asJSON: false) }
                 Button("网页草稿 JSON（与网页预览一致）") { exportDraft(asJSON: true) }
                     .disabled(usingEditedCopy)
@@ -290,11 +291,13 @@ struct FeedbackView: View {
                 Button("完整脱敏诊断 JSON（手动附件）") {
                     if let json = selected?.redactedJSON { export(json, extension: "json", name: "NVCodecTest-diagnostic-redacted") }
                 }.disabled(selected?.redactedJSON == nil)
-            }
-            Menu("复制反馈") {
+            } label: { Text("导出…").foregroundColor(DesignTokens.Text.secondary) }
+                .modifier(NativeMenuStyle())
+            Menu {
                 Button("复制网页草稿正文") { copy(draft.body, notice: "已复制网页草稿正文，与网页预览一致") }
                 Button("复制完整反馈正文") { copy(draft.fullBody, notice: "已复制完整反馈；可在 GitHub 网页手动粘贴") }
-            }
+            } label: { Text("复制反馈").foregroundColor(DesignTokens.Text.secondary) }
+                .modifier(NativeMenuStyle())
             Button(previewTab == .draft ? "前往 GitHub 确认…" : "查看网页草稿", action: openGitHub)
                 .buttonStyle(NativeButtonStyle(prominent: true))
         }.padding(.horizontal, 20).padding(.vertical, 14)

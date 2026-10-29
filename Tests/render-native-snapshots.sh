@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
-# 用途：离线重放已保存 JSON，生成明暗、活跃/失焦及 1×/2× 原生界面快照。
+# 用途：离线重放已保存 JSON，生成明暗、活跃/失焦及 1×/2× 原生界面布局快照。
+# 离屏缓存不代表所有系统合成效果；真实控件外观须通过 --preview 窗口检查。
 # 用法：Tests/render-native-snapshots.sh /绝对路径/NVCodecTest /绝对路径/report.json [输出目录] [--window-frame]
 # 依赖：macOS、已构建的当前版本程序；只重放报告，不运行环境探针或编解码测试。
 SNAPSHOT_TEST_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

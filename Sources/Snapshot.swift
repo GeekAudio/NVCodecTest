@@ -1,12 +1,29 @@
 import AppKit
 import SwiftUI
 
+/// Preview owns its existing model; the production delegate would create a new dashboard.
+private final class SnapshotPreviewDelegate: NSObject, NSApplicationDelegate {
+    let model: TestModel
+    init(model: TestModel) { self.model = model }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard model.running else { return .terminateNow }
+        model.cancel()
+        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [model] timer in
+            if !model.running { timer.invalidate(); sender.reply(toApplicationShouldTerminate: true) }
+        }
+        return .terminateLater
+    }
+}
+
 /// 用当前视图离屏渲染，不依赖屏幕录制权限。可重载真实 JSON，避免每次调布局重跑负载。
 enum Snapshot {
-    static func run(path: String, withResults: Bool, running: Bool = false) {
+    static func run(path: String, withResults: Bool, running: Bool = false, livePreview: Bool = false) {
         let focusPreview = CommandLine.arguments.contains("--focus-preview") || SelfTest.argument("--focus-step") != nil
         let app = NSApplication.shared
-        app.setActivationPolicy(.accessory)
+        app.setActivationPolicy(livePreview ? .regular : .accessory)
         app.finishLaunching()
         let dark = CommandLine.arguments.contains("--dark")
         let light = CommandLine.arguments.contains("--light")
@@ -98,7 +115,7 @@ enum Snapshot {
         window.isReleasedWhenClosed = false
         window.contentView = host
         window.setContentSize(size)
-        // 与生产窗口采用相同的标题栏，不创建 NSToolbar 空白占位。
+        // 与生产窗口采用相同的标准标题栏，不改变主界面布局。
         if inactive {
             window.orderFront(nil)
             window.resignKey()
@@ -138,6 +155,22 @@ enum Snapshot {
             }
         }
         host.displayIfNeeded()
+
+        if livePreview {
+            window.title = "GPU Test · 报告预览"
+            let delegate = SnapshotPreviewDelegate(model: model)
+            app.delegate = delegate
+            let menu = NSMenu()
+            let item = NSMenuItem()
+            let applicationMenu = NSMenu()
+            applicationMenu.addItem(NSMenuItem(title: "关闭预览", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+            item.submenu = applicationMenu
+            menu.addItem(item)
+            app.mainMenu = menu
+            print("preview: 已打开真实原生窗口；不生成离屏图片，不会自动重跑已保存的报告。")
+            withExtendedLifetime(delegate) { app.run() }
+            return
+        }
 
         let includeFrame = CommandLine.arguments.contains("--window-frame")
         let captureView = includeFrame ? (window.contentView?.superview ?? host) : host

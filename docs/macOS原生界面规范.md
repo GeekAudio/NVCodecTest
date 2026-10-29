@@ -8,6 +8,7 @@
 - 所有颜色从系统语义 `NSColor` 或系统材质获得；不以一组固定浅灰或深灰 RGB 模仿系统，也不把绿色当作整个界面的底色。
 - 正文目标对比度为 4.5:1，次要文字为 3:1；用于传递信息的图标目标为 3:1。状态同时提供文字和符号，不能只靠红、绿或蓝区分。
 - “相邻层不超过 6%”必须先说明测量口径。本文分别记录相对亮度差 `|ΔY|`（0–1）和 CIELAB `|ΔL*|`（0–100）；两者不能互换。系统材质没有覆盖所有壁纸、窗口位置和辅助功能设置的固定亮度保证。
+- v1.4.3 相对 v1.4.2 只微调按钮文字、主操作标签和菜单触发器样式，页面架构、右侧 232 pt 环境栏和九项测试布局不变。
 
 ## 按用途组织的令牌
 
@@ -59,6 +60,14 @@ L0  标准 macOS 窗口：windowBackgroundColor
 ```
 
 选中与焦点是两回事：选中项目在窗口失活后仍可识别，但改用非强调的选中语义；键盘焦点环由系统控件显示，不画第二个“焦点边框”。悬停只能使用系统提供的高亮或轻微语义表面变化，不缩放、不位移。
+
+## 当前源码的控件样式
+
+v1.4.3 继续使用 macOS 标准 `Button`：普通操作用 `.bordered`，主操作用 `.borderedProminent`，强调色取 `controlAccentColor`。主按钮保留原位置与快捷键，标签使用 11 pt 图标、13 pt 中等字重文字和 6 pt 间距，显示“开始测试”或“重新测试”。右侧本机环境框沿用原 `SidebarSurface`；菜单、sheet 和窗口装饰交由系统原生控件绘制。源码不手动添加 `.glass`、`.glassProminent`、`GlassEffectContainer` 或内容框 `.glassEffect`。
+
+普通按钮只将标签文字设为 `secondaryLabelColor`，并将按钮层的继承前景重置为系统默认；否则主窗口的 `labelColor` 会连带压深原生按钮底板。macOS 12 及以上保留按钮 role 和 `configuration.trigger`，macOS 11 使用无 role 的 action 初始化；`.bordered` 继续处理原生悬停、按下、焦点与键盘交互。四个导出/反馈 `Menu` 触发器使用 `NativeMenuStyle`：标签自身使用 `secondaryLabelColor`，菜单视图重置继承前景并匹配控件尺寸；macOS 13 及以上使用 `.menuStyle(.button)`，macOS 11–12 使用 `DefaultMenuStyle`。菜单内部项目仍由系统绘制，触发器不套普通按钮样式。
+
+这样使用 macOS 26 的原生外观：Apple 的 [Materials 指南](https://developer.apple.com/design/human-interface-guidelines/materials)将 Liquid Glass 用于导航与控件层，内容区域保持清晰；[WWDC25 第 323 场](https://developer.apple.com/videos/play/wwdc2025/323/)说明标准控件会适应新设计，macOS 的 small / regular 按钮维持紧凑圆角矩形。应用使用系统标准按钮样式，让系统处理控件外观，不在静态环境信息上额外铺玻璃。
 
 ## 可落地的 SwiftUI 与 AppKit 接口
 
@@ -131,7 +140,7 @@ struct NativeWindowSurface: ViewModifier {
 
 ## 自检与验证边界
 
-### 本机测色方法与初始化复查
+### v1.4.2 本机测色方法与初始化复查
 
 2026-10-29，以独立 Swift/AppKit 程序分别解析 Aqua 和 DarkAqua。颜色转换到 sRGB，保留 alpha；有透明度时先在指定的不透明背景上按 sRGB 分量做 source-over 合成，再计算相对亮度与对比度。CIELAB L* 由线性 sRGB 的 D65 相对 Y 计算，不是把 RGB 平均值叫作“明度”。这些是语义色的实测解析值与静态合成模型，不是屏幕光度计或最终渲染像素的抽样；实际材质、合成模式与显示色彩管理仍需在对应场景核验。
 
@@ -227,7 +236,9 @@ hover 的 ΔL* 均为轻微变化，在本机这些静态组合中不超过 6；
 
 界面回归入口见 [render-native-snapshots.sh](../Tests/render-native-snapshots.sh)。传入现成的固定样本或脱敏报告，用 `--results-json` 重放即可覆盖浅/深色、活跃/失活、1×/2×，不需要重跑 GPU 测量；`--window-frame` 保留原生标题栏，`--focus-preview` 只用于活跃窗口。生成截图的成功状态仍不能替代逐张视觉检查或真正的键盘操作。
 
-### 本轮构建与窗口验证记录
+`--preview --results-json <已有报告>` 会在真实窗口中重放保存结果，用于检查当前系统控件外观；它不会自动运行 GPU 测试。本文中较早的测色与窗口记录属于 v1.4.2，不作为 v1.4.3 的验收结论。
+
+### v1.4.2 构建与窗口验证记录
 
 2026-10-29，本轮通用构建已完成 `x86_64`、`arm64` 两个架构，临时副本的严格签名校验已通过。构建记录位于 `build/ui-native-20261029/build-final.log`；这是本地构建与签名证据，不表示已经发布。
 
@@ -238,7 +249,7 @@ hover 的 ΔL* 均为轻微变化，在本机这些静态组合中不超过 6；
 键盘焦点仍未完成实机验证。本机截图日志为 `keyboard-navigation=false`；程序调用 `selectNextKeyView` 后，响应者仍是 `NSWindow`。因此，现有截图不能证明 Tab、Shift-Tab、空格激活与原生焦点环实际可用，需在系统键盘导航开启后另行交互检查。
 
 
-### 最后两项调整后的复核
+### v1.4.2 最后两项调整后的复核
 
 2026-10-29，状态标签已删除撑满一行的 Spacer，采用水平 4 pt、垂直 2 pt 内边距；顶部九段条已移除，底部进度保持。重新完成 Intel / Apple Silicon 优化通用构建及临时副本严格签名校验。
 
@@ -247,6 +258,10 @@ hover 的 ΔL* 均为轻微变化，在本机这些静态组合中不超过 6；
 上述复核未改变键盘焦点的验证边界：系统键盘导航关闭时，程序化 key-view 导航仍未进入控件，不能据此宣称 Tab 与系统焦点环的真实交互已经验证。
 
 
-### 环境侧栏底色减轻
+### v1.4.2 环境侧栏底色减轻
 
 最终发布前按界面反馈，在原生 sidebar 材质上叠加 60% 的 windowBackgroundColor，集中到 Surface.sidebarTint 与 SidebarSurface。右侧环境栏保留 behindWindow；反馈页侧栏保留 withinWindow。两种外观均跟随语义色解析，使侧栏更接近窗口底色，材质与一像素边界仍保留，不通过固定白色或黑色模拟外观。这个派生表面的真实像素仍受原生材质影响，不作跨壁纸的固定明度保证。
+
+### v1.4.3 本轮构建与窗口检查
+
+2026-10-29，最低部署目标 macOS 11 的 `x86_64` 与 `arm64` 构建通过，临时副本严格签名检查通过。CUA 检查了浅色真实生产窗口中的普通与禁用按钮；导出菜单可打开并显示 TXT / JSON，按 Esc 收回；测量方法 sheet 可打开并通过“完成”关闭。深色 `--preview` 读取 v1.4.2 保存报告，在 840 × 660 pt 下九项均可见。窗口结构与 v1.4.2 相同；UI 检查未重新运行 GPU 测试，预览期间手动开始并取消的操作不作为性能证据。本记录不代表全面键盘、所有壁纸或辅助功能组合验收。

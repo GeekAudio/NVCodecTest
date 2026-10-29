@@ -4,13 +4,15 @@
 
 **[下载与版本说明](https://github.com/GeekAudio/NVCodecTest/releases)**
 
-v1.4.2 使用 macOS 原生语义色和材质，外观、强调色跟随系统。主窗口不滚动、不分页，九项测试、环境摘要、进度和全部操作直接可见；完整证据、测量方法、日志与反馈使用弹窗。
+v1.4.3 使用 macOS 原生语义色和材质，外观、强调色跟随系统。主窗口不滚动、不分页，九项测试、环境摘要、进度和全部操作直接可见；完整证据、测量方法、日志与反馈使用弹窗。
+
+这一版保留原页面布局和本机环境栏，把普通按钮的底色与文字调浅，主按钮文案收紧为“开始测试”，强调色跟随系统。下方截图为 v1.4.2，页面结构相同。
 
 ![界面](docs/screenshot.png)
 
 ## 怎么用
 
-下载 DMG，把 App 拖进“应用程序”，打开后点“开始完整测试”。软件 HEVC 比较慢，整轮可能要几分钟，也可以中途取消。
+下载 DMG，把 App 拖进“应用程序”，打开后点“开始测试”。软件 HEVC 比较慢，整轮可能要几分钟，也可以中途取消。
 
 首次被系统拦住，先关闭提示，再到“系统设置 → 隐私与安全性”点“仍要打开”。
 
@@ -58,6 +60,8 @@ App 包含 Intel 和 Apple Silicon 两种架构。NVIDIA / NullMoth 检测主要
 ./build/NVCodecTest.app/Contents/MacOS/NVCodecTest --diagnose --output /tmp/nvcodec-env.json
 ./build/NVCodecTest.app/Contents/MacOS/NVCodecTest --selftest --output /tmp/nvcodec-test.txt --json-output /tmp/nvcodec-test.json
 ```
+
+也可以用 `--preview --results-json <已有报告>` 打开真实窗口查看已保存结果，不重新运行 GPU 测试。
 
 ## 测法说明
 

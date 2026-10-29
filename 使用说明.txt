@@ -1,4 +1,4 @@
-GPU Test — NVCodecTest 视频编解码诊断 v1.4.2
+GPU Test — NVCodecTest 视频编解码诊断 v1.4.3
 ==========================================
 
 用于检查 NullMoth 驱动和 NVIDIA 显卡的 H.264 / HEVC 硬件编解码能力。
@@ -14,7 +14,7 @@ GPU Test — NVCodecTest 视频编解码诊断 v1.4.2
 
 使用
 ----
-程序会在后台采集环境，完成后点“开始完整测试”。
+程序会在后台采集环境，完成后点“开始测试”。
 软件 HEVC 编码较慢，完整测试可能需要几分钟。
 外观和强调色跟随 macOS，默认窗口 860 × 670，最小 840 × 660。
 主窗口为一个页面，不滚动、不分页：九宫格测试卡片、环境摘要、
@@ -23,6 +23,7 @@ NVIDIA 证据结论、进度和所有操作均直接可见。
 右侧“完整环境与编码器…”打开详细安装、加载、版本和注册证据。
 底部“测量方法”和“日志与反馈”分别打开详情弹窗；详情内容允许滚动。
 Command-Return 开始测试，Command-. 请求安全取消。
+v1.4.3 保留原有页面布局，普通按钮底色与文字调浅，按钮底板和交互状态仍由 macOS 绘制；主按钮强调色跟随系统。“开始测试”运行完整九项矩阵。
 
 每项结果的“证据与详情”会显示硬件属性、编码器身份、GPU 证据、
 完整帧数、重复范围和错误。可以复制详情，也可导出 TXT / JSON。
@@ -89,6 +90,9 @@ NVIDIA 已证实：完整输出、硬件属性及 NVIDIA 身份证据共同成�
 
 完整测试（Ctrl-C 请求安全取消）：
 /Applications/NVCodecTest.app/Contents/MacOS/NVCodecTest --selftest --output /tmp/nvcodec-test.txt --json-output /tmp/nvcodec-test.json
+
+真实窗口重放已有报告（不重新测 GPU）：
+/Applications/NVCodecTest.app/Contents/MacOS/NVCodecTest --preview --results-json /tmp/nvcodec-test.json
 
 权限与卸载
 ----------

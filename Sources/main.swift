@@ -61,6 +61,7 @@ if CommandLine.arguments.contains("--help") {
       --output <path.txt|path.json> 保存报告（默认 /tmp/nvcodec-selftest.txt）
       --json-output <path.json>    同时保存结构化报告
       --snapshot <path.png>       离屏渲染界面
+      --preview                   真实窗口预览已保存报告（验证原生控件，不导出图片）
       --with-results              截图前运行完整矩阵
       --results-json <path.json>   用已保存报告渲染，无需重跑负载
       --page <results|environment|methods> 主仪表盘或详情弹窗截图
@@ -81,11 +82,12 @@ if CommandLine.arguments.contains("--selftest") || CommandLine.arguments.contain
     exit(0)
 }
 
-if CommandLine.arguments.contains("--snapshot") {
+if CommandLine.arguments.contains("--snapshot") || CommandLine.arguments.contains("--preview") {
     let path = SelfTest.argument("--snapshot") ?? "/tmp/nvcodec-ui.png"
     Snapshot.run(path: path,
                  withResults: CommandLine.arguments.contains("--with-results"),
-                 running: CommandLine.arguments.contains("--running"))
+                 running: CommandLine.arguments.contains("--running"),
+                 livePreview: CommandLine.arguments.contains("--preview"))
     exit(0)
 }
 

@@ -100,15 +100,40 @@ struct NativeButtonStyle: PrimitiveButtonStyle {
     @ViewBuilder func makeBody(configuration: Configuration) -> some View {
         if #available(macOS 12, *) {
             if prominent {
-                Button(configuration).buttonStyle(.borderedProminent).controlSize(.regular).frame(minHeight: 28)
+                Button(configuration).buttonStyle(.borderedProminent)
+                    .tint(DesignTokens.Interaction.accent)
+                    .controlSize(.regular).frame(minHeight: 28)
                     .opacity(enabled ? 1 : DesignTokens.Interaction.disabledOpacity)
             } else {
-                Button(configuration).buttonStyle(.bordered).controlSize(.regular).frame(minHeight: 28)
+                Button(role: configuration.role, action: configuration.trigger) {
+                    configuration.label.foregroundColor(DesignTokens.Text.secondary)
+                }.buttonStyle(.bordered)
+                    // An inherited labelColor also darkens the native bezel. Reset it here;
+                    // only the label receives secondaryLabelColor (Aqua 3.95 / Dark 5.89:1
+                    // on controlBackground; dynamic native bezels are checked separately).
+                    .foregroundColor(nil)
+                    .controlSize(.regular).frame(minHeight: 28)
                     .opacity(enabled ? 1 : DesignTokens.Interaction.disabledOpacity)
             }
         } else {
-            Button(configuration).buttonStyle(DefaultButtonStyle()).controlSize(.regular).frame(minHeight: 28)
+            Button(action: configuration.trigger) {
+                configuration.label.foregroundColor(DesignTokens.Text.secondary)
+            }.buttonStyle(DefaultButtonStyle()).foregroundColor(nil)
+                .controlSize(.regular).frame(minHeight: 28)
                 .opacity(enabled ? 1 : DesignTokens.Interaction.disabledOpacity)
+        }
+    }
+}
+
+/// Style the menu's trigger only; its entries keep the native menu appearance.
+struct NativeMenuStyle: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(macOS 13, *) {
+            content.menuStyle(.button).foregroundColor(nil)
+                .controlSize(.regular).frame(minHeight: 28)
+        } else {
+            content.menuStyle(DefaultMenuStyle()).foregroundColor(nil)
+                .controlSize(.regular).frame(minHeight: 28)
         }
     }
 }

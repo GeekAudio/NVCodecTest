@@ -61,9 +61,16 @@ struct MainView: View {
                     .keyboardShortcut(".", modifiers: .command)
             } else {
                 Button(action: model.start) {
-                    Label(model.tested ? "重新测试" : "开始完整测试", systemImage: "play.fill")
+                    HStack(spacing: 6) {
+                        Image(systemName: "play.fill").font(.system(size: 11, weight: .semibold))
+                            .accessibilityHidden(true)
+                        Text(model.tested ? "重新测试" : "开始测试")
+                            .font(.system(size: 13, weight: .medium))
+                    }
                 }.buttonStyle(NativeButtonStyle(prominent: true)).disabled(!model.canStart)
                     .keyboardShortcut(.return, modifiers: .command)
+                    .accessibilityLabel(Text(model.tested ? "重新测试" : "开始测试"))
+                    .help("运行完整的九项编解码测试（⌘↩）")
             }
         }.frame(height: 28)
     }
@@ -164,7 +171,16 @@ struct MainView: View {
                 Menu {
                     Button("导出文本 TXT") { model.exportReport() }
                     Button("导出完整 JSON") { model.exportReport(asJSON: true) }
-                } label: { Label(model.results.isEmpty ? "导出环境" : "导出报告", systemImage: "square.and.arrow.up") }
+                } label: {
+                    Label {
+                        Text(model.results.isEmpty ? "导出环境" : "导出报告")
+                            .foregroundColor(DesignTokens.Text.secondary)
+                    } icon: {
+                        Image(systemName: "square.and.arrow.up")
+                            .foregroundColor(DesignTokens.Text.secondary)
+                    }
+                }
+                    .modifier(NativeMenuStyle())
                     .fixedSize().disabled(!model.canExport)
             }.font(DesignTokens.Font.small)
         }.frame(height: 54)
