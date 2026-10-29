@@ -396,12 +396,12 @@ enum EnvProbe {
         if !evidence.loadedProbeSucceeded { evidence.probeErrors.append("加载状态无法读取（" + loadFailures.joined(separator: "；") + "）") }
         if let encoders = encoders {
             evidence.encoderProbeSucceeded = encoderProbeSucceeded ?? true
-            evidence.registeredEncoderIDs = encoders.map(\.encoderID).filter { $0.hasPrefix("com.nvmtl.") }
+            evidence.registeredEncoderIDs = encoders.map(\.encoderID).filter { NullMothContract.isNVENCVideoEncoder($0) }
             if !evidence.encoderProbeSucceeded { evidence.probeErrors.append("当前进程编码器枚举失败") }
         } else {
             let probe = probeEncoders()
             evidence.encoderProbeSucceeded = probe.status == noErr
-            evidence.registeredEncoderIDs = probe.encoders.map(\.encoderID).filter { $0.hasPrefix("com.nvmtl.") }
+            evidence.registeredEncoderIDs = probe.encoders.map(\.encoderID).filter { NullMothContract.isNVENCVideoEncoder($0) }
             if probe.status != noErr { evidence.probeErrors.append("编码器枚举失败：OSStatus \(probe.status)") }
         }
         return evaluateDriver(evidence)
@@ -469,7 +469,7 @@ enum EnvProbe {
 
     /// 当前进程是否已被 NVMTL 插件注册了编码器
     static func nvmtlEncodersRegistered() -> Bool {
-        for e in encoderList() where e.encoderID.hasPrefix("com.nvmtl.") { return true }
+        for e in encoderList() where NullMothContract.isNVENCVideoEncoder(e.encoderID) { return true }
         return false
     }
 
