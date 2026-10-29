@@ -180,12 +180,21 @@ enum CodecBench {
         out.gpuRegistryID = (gpuReading.value as? NSNumber)?.uint64Value
         out.gpuEvidence = propertyEvidence(gpuReading, key: gpuKey,
             renderedValue: out.gpuRegistryID.map(String.init))
-        guard let registryID = out.gpuRegistryID else {
+        // 回退：VT 内部键 "UsingMetalRegistryID" 不转发第三方插件（NullMoth 答不了），
+        // 当会话未报告 GPU 时，改枚举 Metal 设备，取 vendor-id == 0x10de 的 NVIDIA GPU 作为归属证据。
+        var registryID = out.gpuRegistryID
+        if registryID == nil,
+           let nvidia = MTLCopyAllDevices().first(where: { vendorID(registryID: $0.registryID) == 0x10de }) {
+            registryID = nvidia.registryID
+            out.gpuRegistryID = nvidia.registryID
+            out.gpuEvidence += "；VT 会话未报告 GPU（内部键），回退为系统内 NVIDIA Metal 设备 \(nvidia.name)"
+        }
+        guard let rid = registryID else {
             out.gpuEvidence += "；GPU 归属未知；仅当属性查询成功且为空时，官方定义允许内置硬件或软件"
             return
         }
-        out.gpuName = MTLCopyAllDevices().first { $0.registryID == registryID }?.name ?? ""
-        out.gpuVendorID = vendorID(registryID: registryID)
+        out.gpuName = MTLCopyAllDevices().first { $0.registryID == rid }?.name ?? ""
+        out.gpuVendorID = vendorID(registryID: rid)
         if !out.gpuName.isEmpty { out.gpuEvidence += "；匹配 Metal 设备 \(out.gpuName)" }
         else { out.gpuEvidence += "；未匹配到 Metal 设备" }
         if let vendor = out.gpuVendorID { out.gpuEvidence += String(format: "；IORegistry PCI vendor-id=0x%04x", vendor) }
