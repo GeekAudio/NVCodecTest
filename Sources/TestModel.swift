@@ -117,7 +117,7 @@ final class TestModel: ObservableObject {
     }
     var driver: String { env.first { $0.key == "NullMoth 驱动" }?.value ?? "正在检查…" }
     var driverNote: String { env.first { $0.key == "NullMoth 驱动" }?.note ?? "" }
-    var nvidiaEncoders: [EncoderRow] { encoders.filter { $0.encoderID.hasPrefix("com.nvmtl.") } }
+    var nvidiaEncoders: [EncoderRow] { encoders.filter { NullMothContract.isNVENCVideoEncoder($0.encoderID) } }
     var hwEncoders: [EncoderRow] { encoders.filter(\.isHardware) }
     var decoderDeclaration: String {
         guard declaredDecoderCapabilities != nil else { return "报告未记录此项" }
