@@ -62,8 +62,6 @@ final class TestModel: ObservableObject {
     @Published var lastEnvironmentDate: Date?
     @Published var diagnosticStore: DiagnosticLogStore?
     @Published var diagnosticLogError: String?
-    @Published private(set) var lastRunDiagnosticID: String?
-    private var lastRunStartedAt: Date?
 
     private var workerClient: CodecWorkerClient?
     private var activeLog: RunLogRecorder?
@@ -101,8 +99,6 @@ final class TestModel: ObservableObject {
         refreshing = true
         results = []
         plannedCaseIDs = nil
-        lastRunDiagnosticID = nil
-        lastRunStartedAt = nil
         finished = false
         wasCancelled = false
         cancelRequested = false
@@ -179,8 +175,6 @@ final class TestModel: ObservableObject {
         let client = makeWorker(["--codec-worker"] + arguments)
         workerClient = client
         plannedCaseIDs = plan
-        lastRunStartedAt = Date()
-        lastRunDiagnosticID = nil
         running = true
         finished = false
         cancelRequested = false
@@ -192,7 +186,7 @@ final class TestModel: ObservableObject {
         let kind = plan.count == CodecTestPlan.allCaseIDs.count ? "完整测试" : (plan.count == 1 ? "单项测试" : "所选项目测试")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let log = self?.makeLog(existing: existingStore, kind: kind, plannedCaseIDs: plan)
-            DispatchQueue.main.async { self?.activeLog = log; self?.lastRunDiagnosticID = log?.id }
+            DispatchQueue.main.async { self?.activeLog = log }
             let completion = client.run(onEvent: { event in
                 if let snapshot = event.environment {
                     log?.capture(snapshot)
@@ -264,17 +258,6 @@ final class TestModel: ObservableObject {
                                redactedText: try store.read(entry), redactedJSON: try store.readReport(entry),
                                summary: "\(entry.kind) · \(entry.state.title)", sourceDescription: "本机自动留存的脱敏日志", isLocalRecord: true)
         }
-    }
-
-    var currentHistoryReport: CodecReport? {
-        guard !env.isEmpty, !results.isEmpty else { return nil }
-        return CodecReport(schemaVersion: 1, appVersion: SelfTest.version,
-            createdAt: lastRunStartedAt ?? lastEnvironmentDate ?? Date(), environmentCapturedAt: lastEnvironmentDate,
-            target: "Hackintosh NVIDIA / NullMoth VideoToolbox",
-            runState: running ? "测试进行中" : SelfTest.runState(results, wasCancelled: wasCancelled, plannedCaseIDs: plannedCaseIDs),
-            wasCancelled: wasCancelled, environment: env, driverReport: driverReport,
-            declaredDecoderCapabilities: declaredDecoderCapabilities, encoders: encoders,
-            plannedCaseIDs: plannedCaseIDs, results: results, methodology: CodecBench.measurementDescription)
     }
 
     /// 历史仅从本机已有的结构化诊断记录读取，由 sheet 在后台调用。

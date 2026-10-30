@@ -284,7 +284,6 @@ enum SelfTest {
 final class RunLogRecorder {
     let store: DiagnosticLogStore
     private let session: DiagnosticLogSession
-    var id: String { session.id }
     private let queue = DispatchQueue(label: "com.geekaudio.NVCodecTest.diagnostic-log", qos: .utility,
                                       autoreleaseFrequency: .workItem)
     private let onError: (String) -> Void

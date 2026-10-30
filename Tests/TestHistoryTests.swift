@@ -11,165 +11,108 @@ struct TestHistoryTests {
             if !condition() { failures.append(name) }
         }
 
-        let firstID = CodecTestPlan.allCaseIDs[0]
-        let softwareID = CodecTestPlan.allCaseIDs[1]
-        let currentNVIDIA = row(fps: 125, registryID: 0x1234, attribution: .nvidiaConfirmed,
-                                nvidia: true, hardware: true)
-        let baselineNVIDIA = row(fps: 100, registryID: 0x1234, attribution: .nvidiaConfirmed,
-                                 nvidia: true, hardware: true)
-        let currentReport = report(rows: [currentNVIDIA], plan: [firstID])
-        let baselineReport = report(rows: [baselineNVIDIA], plan: [firstID])
+        let cases = CodecTestPlan.cases
+        let first = cases[0]
+        let second = cases[1]
+        let third = cases[2]
+        check(TestHistoryMatrix.cases.map(\.id) == CodecTestPlan.allCaseIDs && cases.count == 9,
+              "matrix columns use all nine canonical cases in grid order")
+        check(TestHistoryMatrix.rows(entries: []).isEmpty,
+              "an empty local history produces no table rows")
 
-        let matched = onlyRow(current: currentReport, baseline: baselineReport)
-        check(matched.changePercent == 25, "same confirmed NVIDIA registry identity and workload compares throughput")
-        check(matched.currentValue == "125.0 FPS" && matched.baselineValue == "100.0 FPS",
-              "both measured FPS values remain visible")
-        check(matched.note.contains("不代表画质"), "hardware comparison is labeled as throughput only")
-
-        let noRegistry = row(fps: 90, registryID: nil, attribution: .nvidiaConfirmed,
-                             nvidia: true, hardware: true)
-        let missingID = onlyRow(current: currentReport,
-                                baseline: report(rows: [noRegistry], plan: [firstID]))
-        check(missingID.changePercent == nil && missingID.currentValue == "125.0 FPS"
-              && missingID.baselineValue == "90.0 FPS",
-              "confirmed NVIDIA runs missing a registry ID show FPS without a delta")
-        check(missingID.note.contains("Registry ID"), "missing registry ID explains why device identity is unknown")
-
-        let differentGPU = row(fps: 100, registryID: 0x5678, attribution: .nvidiaConfirmed,
-                               nvidia: true, hardware: true)
-        let otherDevice = onlyRow(current: currentReport,
-                                  baseline: report(rows: [differentGPU], plan: [firstID]))
-        check(otherDevice.changePercent == nil && otherDevice.note.contains("不同"),
-              "different confirmed GPU registry IDs do not get a percent change")
-
-        let unknownGPU = row(fps: 100, registryID: 0x1234, attribution: .systemHardwareUnknownGPU,
-                             nvidia: false, hardware: true)
-        let unknownAttribution = onlyRow(current: currentReport,
-                                         baseline: report(rows: [unknownGPU], plan: [firstID]))
-        check(unknownAttribution.changePercent == nil && unknownAttribution.currentValue == "125.0 FPS"
-              && unknownAttribution.baselineValue == "100.0 FPS",
-              "unknown NVIDIA attribution leaves separate measurements visible without a delta")
-
-        let softwareCurrent = row(group: "编码", item: "H.264 1080p", mode: "软件编码", fps: 81,
-                                  attribution: .software, hardware: false)
-        let softwareBaseline = row(group: "编码", item: "H.264 1080p", mode: "软件编码", fps: 72,
-                                   attribution: .software, hardware: false)
-        let softwareReportCurrent = report(rows: [softwareCurrent], plan: [softwareID], cpu: "Intel CPU X")
-        let softwareReportBaseline = report(rows: [softwareBaseline], plan: [softwareID], cpu: "Intel CPU X")
-        let softwareMatch = onlyRow(current: softwareReportCurrent, baseline: softwareReportBaseline)
-        check(softwareMatch.changePercent == 12.5, "software comparison requires and accepts matching CPU environment")
-
-        let differentCPU = report(rows: [softwareBaseline], plan: [softwareID], cpu: "Intel CPU Y")
-        let cpuMismatch = onlyRow(current: softwareReportCurrent, baseline: differentCPU)
-        check(cpuMismatch.changePercent == nil && cpuMismatch.note.contains("CPU"),
-              "software results from different CPU environments are not compared")
-
-        let decodeSoftwareID = CodecTestPlan.cases.first { $0.group == "解码" && $0.mode == "软件解码" }!.id
-        let decodeCurrent = row(group: "解码", item: "H.264 1080p", mode: "软件解码", fps: 140,
-                                attribution: .software, hardware: false)
-        let decodeBaseline = row(group: "解码", item: "H.264 1080p", mode: "软件解码", fps: 120,
-                                 attribution: .software, hardware: false)
-        let decodeNoDelta = onlyRow(
-            current: report(rows: [decodeCurrent], plan: [decodeSoftwareID], cpu: "Intel CPU X"),
-            baseline: report(rows: [decodeBaseline], plan: [decodeSoftwareID], cpu: "Intel CPU X"))
-        check(decodeNoDelta.currentValue == "140.0 FPS" && decodeNoDelta.baselineValue == "120.0 FPS"
-              && decodeNoDelta.changePercent == nil && decodeNoDelta.note.contains("同一码流"),
-              "decode FPS stays visible but no delta is inferred without an input-stream fingerprint")
-
-        var differentMeasurements = baselineNVIDIA
-        var changedStats = differentMeasurements.statistics ?? BenchStatistics()
-        changedStats.measurementCount = 2
-        differentMeasurements = row(fps: 100, registryID: 0x1234, attribution: .nvidiaConfirmed,
-            nvidia: true, hardware: true, statistics: changedStats)
-        let measurementMismatch = onlyRow(current: currentReport,
-            baseline: report(rows: [differentMeasurements], plan: [firstID]))
-        check(measurementMismatch.changePercent == nil && measurementMismatch.note.contains("测量次数"),
-              "different measurement counts cannot be compared")
-
-        let methodologyMismatch = onlyRow(current: currentReport,
-            baseline: report(rows: [baselineNVIDIA], plan: [firstID], methodology: "different methodology"))
-        check(methodologyMismatch.changePercent == nil && methodologyMismatch.note.contains("测量方法"),
-              "methodology changes block direct deltas")
-
-        let failedBaseline = row(group: "编码", item: "H.264 1080p", mode: "强制硬件", fps: 0,
-                                 status: .failed, ok: false, attribution: .unknown, hardware: nil)
-        let failedComparison = onlyRow(current: currentReport,
-            baseline: report(rows: [failedBaseline], plan: [firstID]))
-        check(failedComparison.baselineValue == "失败" && failedComparison.changePercent == nil,
-              "failed result remains a status and is never converted to zero FPS")
-        check(failedComparison.baselineValue != "0.0 FPS", "failure status is never rendered as a zero measurement")
-
-        let cancelled = row(group: "编码", item: "H.264 1080p", mode: "强制硬件", fps: 0,
-                            status: .cancelled, ok: false, attribution: .unknown, hardware: nil)
-        let cancelledComparison = onlyRow(current: currentReport,
-            baseline: report(rows: [cancelled], plan: [firstID]))
-        check(cancelledComparison.baselineValue == "已取消" && cancelledComparison.changePercent == nil,
-              "cancelled rows are distinct from failed or zero-FPS rows")
-
-        let untestedComparison = onlyRow(current: currentReport, baseline: report(rows: [], plan: [firstID]))
-        check(untestedComparison.baselineValue == "未测试" && untestedComparison.changePercent == nil,
-              "planned but missing historical rows remain untested")
-        let omittedComparison = onlyRow(current: currentReport, baseline: report(rows: [], plan: [softwareID]))
-        check(omittedComparison.baselineValue == "该轮未选择" && omittedComparison.changePercent == nil,
-              "a case outside the baseline's explicit plan is not treated as untested data")
-
-        let duplicateCurrent = report(rows: [currentNVIDIA, currentNVIDIA], plan: [firstID])
-        let duplicate = onlyRow(current: duplicateCurrent, baseline: baselineReport)
-        check(duplicate.currentValue == "结果重复" && duplicate.changePercent == nil,
-              "duplicate case rows are rejected as ambiguous")
-
-        let subsetRows = TestHistoryComparison.rows(current: currentReport, baseline: nil)
-        check(subsetRows.count == 1 && subsetRows[0].id == firstID,
-              "explicit current scope limits the table to selected rows")
-        let legacyReport = report(rows: [currentNVIDIA], plan: nil)
-        let legacyRows = TestHistoryComparison.rows(current: legacyReport, baseline: nil)
-        check(legacyRows.count == 9 && legacyRows[0].currentValue == "125.0 FPS"
-              && legacyRows.dropFirst().allSatisfy { $0.currentValue == "未测试" },
-              "legacy schema-1 reports without a plan retain the nine-case scope")
-
+        let firstPassed = row(first, fps: 123.456, evidence: "session GPU Registry ID confirmed")
+        let secondPassed = row(second, fps: 99.95, hardware: false, attribution: .software)
+        let failed = row(third, fps: 0, status: .failed, ok: false, hardware: nil)
+        let cancelled = row(cases[3], fps: 500, status: .cancelled, ok: false, hardware: nil)
+        let unverified = row(cases[4], fps: 700, status: .unverified, ok: false, hardware: nil)
+        let notTested = row(cases[5], fps: 800, status: .notTested, ok: false, hardware: nil)
         let now = Date(timeIntervalSince1970: 1_800_000_000)
-        let older = TestHistoryEntry(id: "older", createdAt: now.addingTimeInterval(-60), report: baselineReport)
-        let currentLog = TestHistoryEntry(id: "current", createdAt: now, report: currentReport)
-        let newer = TestHistoryEntry(id: "newer", createdAt: now.addingTimeInterval(60), report: baselineReport)
-        let history = TestHistoryComparison.excludingCurrent([older, currentLog, newer], currentRunID: "current")
-        check(history.map(\.id) == ["newer", "older"], "history excludes current run and sorts newest first")
+        let fullReport = report(rows: [firstPassed, secondPassed, failed, cancelled, unverified, notTested], plan: nil)
+        let fullEntry = TestHistoryEntry(id: "older", createdAt: now.addingTimeInterval(-60), report: fullReport)
+        let fullMatrix = TestHistoryMatrix.rows(entries: [fullEntry])
+        check(fullMatrix.count == 1 && fullMatrix[0].cells.count == 9,
+              "a single saved history still displays one row with all nine columns")
+        check(fullMatrix[0].cells.map(\.caseID) == CodecTestPlan.allCaseIDs,
+              "each history row keeps canonical nine-column order")
+        check(fullMatrix[0].cells[0].value == "123.5 FPS"
+              && fullMatrix[0].cells[1].value == "100.0 FPS",
+              "successful finite FPS values are formatted to one decimal place")
+        check(fullMatrix[0].cells[2].value == "失败" && fullMatrix[0].cells[3].value == "取消"
+              && fullMatrix[0].cells[4].value == "待验证" && fullMatrix[0].cells[5].value == "未测",
+              "failed, cancelled, unverified and untested values keep distinct labels")
+        check(fullMatrix[0].cells[6].value == "未测" && fullMatrix[0].cells[8].value == "未测",
+              "missing result rows in a legacy full-plan report display as untested")
+        check(fullMatrix[0].passedSummary == "2/9",
+              "passed count includes only valid successful rows and uses the report scope")
+        check(fullMatrix[0].cells[0].help.contains("session GPU Registry ID confirmed")
+              && fullMatrix[0].cells[0].help.contains("编码"),
+              "cell help preserves case identity and session evidence")
+        check(fullMatrix[0].context.contains("CPU") && fullMatrix[0].context.contains("GPU"),
+              "time-column help supplies machine context without adding extra columns")
+
+        let selectedReport = report(rows: [firstPassed, row(second, fps: 0, status: .failed, ok: false)],
+                                    plan: [first.id, second.id])
+        let selectedCells = TestHistoryMatrix.rows(entries: [
+            TestHistoryEntry(id: "selected", createdAt: now, report: selectedReport)
+        ])[0].cells
+        check(selectedCells.count == 9 && selectedCells[0].value == "123.5 FPS"
+              && selectedCells[1].value == "失败" && selectedCells[2].value == "未选",
+              "subset reports still occupy nine columns and mark out-of-plan cases unselected")
+        let selectedRow = TestHistoryMatrix.rows(entries: [
+            TestHistoryEntry(id: "selected", createdAt: now, report: selectedReport)
+        ])[0]
+        check(selectedRow.passedSummary == "1/2", "pass denominator follows the explicit run plan")
+
+        let missingPlanned = report(rows: [], plan: [first.id])
+        check(TestHistoryMatrix.cell(report: missingPlanned, caseID: first.id).value == "未测",
+              "a planned case with no stored row is untested")
+        check(TestHistoryMatrix.cell(report: selectedReport, caseID: third.id).value == "未选",
+              "a case outside an explicit plan is unselected")
+
+        let malformedPassed = row(first, fps: .nan, status: .passed, ok: true)
+        let invalidFPS = TestHistoryMatrix.cell(report: report(rows: [malformedPassed], plan: [first.id]), caseID: first.id)
+        check(invalidFPS.value == "待验证" && invalidFPS.help.contains("没有有效"),
+              "non-finite or non-positive FPS never appears as a measurement")
+        let contradictory = row(first, fps: 999, status: .passed, ok: false)
+        check(TestHistoryMatrix.cell(report: report(rows: [contradictory], plan: [first.id]), caseID: first.id).value == "待验证",
+              "a passed status without a successful result is not counted")
+
+        let duplicate = TestHistoryMatrix.cell(report: report(rows: [firstPassed, firstPassed], plan: [first.id]), caseID: first.id)
+        check(duplicate.value == "待验证" && duplicate.help.contains("多个结果行"),
+              "duplicate canonical rows are surfaced as ambiguous instead of choosing one")
+
+        let newest = TestHistoryEntry(id: "newest", createdAt: now, report: fullReport)
+        let newer = TestHistoryEntry(id: "newer", createdAt: now.addingTimeInterval(60), report: fullReport)
+        let sorted = TestHistoryMatrix.rows(entries: [fullEntry, newest, newer])
+        check(sorted.map(\.id) == ["newer", "newest", "older"],
+              "all supplied history rounds display in descending date order")
 
         if failures.isEmpty {
-            print("Test history fixtures: \(checks) checks passed (synthetic reports; no GPU or network)")
+            print("Test history matrix fixtures: \(checks) checks passed (synthetic reports; no GPU or network)")
         } else {
             failures.forEach { FileHandle.standardError.write(Data(("FAIL: \($0)\n").utf8)) }
-            FileHandle.standardError.write(Data("Test history fixtures: \(failures.count)/\(checks) failed\n".utf8))
+            FileHandle.standardError.write(Data("Test history matrix fixtures: \(failures.count)/\(checks) failed\n".utf8))
             exit(1)
         }
     }
 
-    private static func onlyRow(current: CodecReport, baseline: CodecReport) -> TestHistoryComparisonRow {
-        guard let row = TestHistoryComparison.rows(current: current, baseline: baseline).first else {
-            fatalError("expected one planned test row")
-        }
-        return row
+    private static func report(rows: [BenchRow], plan: [String]?, appVersion: String = "1.4.5") -> CodecReport {
+        CodecReport(schemaVersion: 1, appVersion: appVersion, createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            environmentCapturedAt: nil, target: "fixture", runState: "测试完成", wasCancelled: false,
+            environment: [EnvRow("系统", "macOS fixture"), EnvRow("机型", "Mac fixture"),
+                          EnvRow("CPU", "Intel CPU fixture"), EnvRow("GPU", "NVIDIA fixture")],
+            driverReport: nil, declaredDecoderCapabilities: nil, encoders: [],
+            plannedCaseIDs: plan, results: rows, methodology: "fixture method")
     }
 
-    private static func report(rows: [BenchRow], plan: [String]?, cpu: String = "Intel CPU X",
-                               methodology: String = "fixed methodology") -> CodecReport {
-        CodecReport(schemaVersion: 1, appVersion: "test", createdAt: Date(timeIntervalSince1970: 1_700_000_000),
-            environmentCapturedAt: nil, target: "fixture", runState: "test", wasCancelled: false,
-            environment: [EnvRow("CPU", cpu)], driverReport: nil, declaredDecoderCapabilities: nil,
-            encoders: [], plannedCaseIDs: plan, results: rows, methodology: methodology)
-    }
-
-    private static func row(group: String = "编码", item: String = "H.264 1080p", mode: String = "强制硬件",
-                            fps: Double, status: BenchStatus = .passed, ok: Bool = true,
-                            registryID: UInt64? = nil, attribution: BenchAttribution = .unknown,
-                            nvidia: Bool = false, hardware: Bool? = nil,
-                            statistics: BenchStatistics? = nil) -> BenchRow {
-        let stats = statistics ?? BenchStatistics(frames: 120, requestedFrames: 120,
-            submittedFrames: 120, droppedFrames: 0, elapsed: 2, measurementCount: 3,
-            fpsMin: fps, fpsMax: fps)
-        return BenchRow(group: group, item: item, mode: mode, ok: ok, fps: fps,
-            engine: "fixture", detail: "synthetic", status: status,
-            hardwareAccelerated: hardware, gpuRegistryID: registryID,
-            gpuVendorID: nvidia ? 0x10de : nil, attribution: attribution,
-            isNVIDIAConfirmed: nvidia, statistics: stats)
+    private static func row(_ testCase: CodecTestPlan.Case, fps: Double,
+                            status: BenchStatus = .passed, ok: Bool = true,
+                            hardware: Bool? = true, attribution: BenchAttribution = .nvidiaConfirmed,
+                            evidence: String = "") -> BenchRow {
+        BenchRow(group: testCase.group, item: testCase.item, mode: testCase.mode,
+            ok: ok, fps: fps, engine: "fixture engine", detail: "fixture detail",
+            status: status, hardwareAccelerated: hardware,
+            attribution: attribution, isNVIDIAConfirmed: attribution == .nvidiaConfirmed,
+            hardwareEvidence: evidence, gpuEvidence: evidence, nvidiaEvidence: evidence)
     }
 }

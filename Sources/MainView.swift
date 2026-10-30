@@ -45,8 +45,7 @@ struct MainView: View {
             case .methods: DetailWindow(title: "测量方法") { MeasurementMethodsView() }
             case .result(let row): ResultDetails(row: row).background(Color.codecBackground)
             case .history:
-                TestHistoryView(currentReport: model.currentHistoryReport, currentRunID: model.lastRunDiagnosticID,
-                                loadHistory: model.testHistoryLoader())
+                TestHistoryView(loadHistory: model.testHistoryLoader())
             case .feedback:
                 FeedbackView(refreshHistory: model.feedbackHistoryLoader(), deleteDiagnostic: { try model.deleteDiagnostic($0) },
                              clearHistory: { try model.diagnosticStore?.clear() }, storageNotice: model.diagnosticLogError)

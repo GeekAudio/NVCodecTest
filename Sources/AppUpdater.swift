@@ -452,7 +452,7 @@ final class AppUpdateCoordinator: NSObject, URLSessionDataDelegate, URLSessionDo
             stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8
             stack.frame = NSRect(x: 0, y: 0, width: 340, height: 42)
             let label = NSTextField(labelWithString: "")
-            label.font = .systemFont(ofSize: 12); label.lineBreakMode = .byTruncatingTail
+            label.font = .systemFont(ofSize: 13); label.lineBreakMode = .byTruncatingTail
             let bar = NSProgressIndicator()
             bar.style = .bar; bar.isIndeterminate = false; bar.minValue = 0; bar.maxValue = 1
             bar.frame = NSRect(x: 0, y: 0, width: 340, height: 12)
