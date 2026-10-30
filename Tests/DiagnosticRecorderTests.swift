@@ -40,7 +40,8 @@ struct DiagnosticRecorderTests {
 
         let store = try DiagnosticLogStore(rootURL: root.appendingPathComponent("normal"))
         var errors: [String] = []
-        let recorder = try RunLogRecorder(store: store, kind: "recorder-fixture") { errors.append($0) }
+        let plannedCaseIDs = [final.id]
+        let recorder = try RunLogRecorder(store: store, kind: "recorder-fixture", plannedCaseIDs: plannedCaseIDs) { errors.append($0) }
         recorder.capture(snapshot)
         recorder.progress(0.1, message: "固定阶段 1/120")
         recorder.record(initial)
@@ -60,6 +61,8 @@ struct DiagnosticRecorderTests {
         check(report.results[0].hardwareAccelerated == true && !report.results[0].isNVIDIAConfirmed,
               "the recorder preserves unknown GPU attribution rather than inventing NVIDIA success")
         check(report.wasCancelled && report.environmentCapturedAt == capturedAt, "recorder snapshots retain run cancellation and original environment time")
+        check(report.plannedCaseIDs == plannedCaseIDs && report.runState == "已取消，已完成 1/1 项",
+              "diagnostic log report records the selected scope and its partial completion count")
         check(!text.contains("FIXTURE_RECORDER_SERIAL") && !reportJSON.contains("FIXTURE_RECORDER_SERIAL"), "the recorder cannot bypass boot-argument redaction")
 
         let limits = DiagnosticLogLimits(maxSessions: 20, maxAgeDays: 30, maxTotalBytes: 100000,

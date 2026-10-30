@@ -13,7 +13,16 @@ struct CodecWorkerEvent: Codable {
 /// The measuring process creates no window and writes no diagnostic files.
 /// The parent records its events and driver stderr in a different address space.
 enum CodecWorker {
-    static func run() {
+    /// Parse selection before environment probing so bad CLI input cannot start any test work.
+    static func run(arguments: [String] = CommandLine.arguments) -> Int32 {
+        let selectedCaseIDs: [String]
+        do {
+            selectedCaseIDs = try CodecTestPlan.selection(in: arguments)
+        } catch {
+            FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8))
+            return 64
+        }
+
         let token = BenchCancellation(), parent = getppid()
         signal(SIGINT, SIG_IGN); signal(SIGTERM, SIG_IGN)
         let signals = [SIGINT, SIGTERM].map { number -> DispatchSourceSignal in
@@ -42,10 +51,16 @@ enum CodecWorker {
         let snapshot = EnvironmentSnapshot(rows: captured.rows + [EnvRow("测量进程", "独立进程 PID=\(getpid())", note: "在主线程初始化 Metal 和 VideoToolbox；此进程不创建窗口、不写日志文件。")],
             encoders: captured.encoders, driver: captured.driver, decoderCaps: captured.decoderCaps, capturedAt: captured.capturedAt)
         emit(CodecWorkerEvent(kind: "environment", environment: snapshot))
-        _ = CodecBench.runAll(progress: { value, message in
+        do {
+            _ = try CodecBench.run(caseIDs: Set(selectedCaseIDs), progress: { value, message in
             emit(CodecWorkerEvent(kind: "progress", progress: value, message: message))
-        }, onRow: { row in emit(CodecWorkerEvent(kind: "row", row: row)) }, cancellation: token)
+            }, onRow: { row in emit(CodecWorkerEvent(kind: "row", row: row)) }, cancellation: token)
+        } catch {
+            FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8))
+            return 64
+        }
         emit(CodecWorkerEvent(kind: "complete", cancelled: token.isCancelled))
+        return 0
     }
 }
 
@@ -64,9 +79,16 @@ final class CodecWorkerClient {
     private var sentCancellation = false
     private let executableURL: URL?
     private let arguments: [String]
+    private let expectedCaseIDs: Set<String>
 
-    init(executableURL: URL? = Bundle.main.executableURL, arguments: [String] = ["--codec-worker"]) {
+    init(executableURL: URL? = Bundle.main.executableURL, arguments: [String] = ["--codec-worker"],
+         expectedCaseIDs: [String]? = nil) {
         self.executableURL = executableURL; self.arguments = arguments
+        if let expectedCaseIDs {
+            self.expectedCaseIDs = (try? Set(CodecTestPlan.validate(expectedCaseIDs))) ?? []
+        } else {
+            self.expectedCaseIDs = (try? Set(CodecTestPlan.selection(in: arguments))) ?? []
+        }
     }
     func cancel() {
         lock.lock(); requestedCancellation = true
@@ -108,11 +130,12 @@ final class CodecWorkerClient {
         }
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
         var pending = Data(), gotEnvironment = false, gotCompletion = false, cancelled = false
-        var rowIDs = Set<String>(), protocolError = false
+        var rowIDs = Set<String>(), protocolError = expectedCaseIDs.isEmpty
         func receive(_ line: Data) {
             guard let event = try? decoder.decode(CodecWorkerEvent.self, from: line) else {
                 onDiagnostic(String(decoding: line.prefix(8192), as: UTF8.self)); return
             }
+            guard !gotCompletion else { protocolError = true; return }
             switch event.kind {
             case "environment":
                 guard event.environment != nil, !gotEnvironment else { protocolError = true; return }
@@ -120,7 +143,8 @@ final class CodecWorkerClient {
             case "progress":
                 guard gotEnvironment, event.progress != nil else { protocolError = true; return }
             case "row":
-                guard gotEnvironment, let row = event.row, rowIDs.insert(row.id).inserted else { protocolError = true; return }
+                guard gotEnvironment, let row = event.row,
+                      expectedCaseIDs.contains(row.id), rowIDs.insert(row.id).inserted else { protocolError = true; return }
             case "complete":
                 guard gotEnvironment, event.cancelled != nil, !gotCompletion else { protocolError = true; return }
                 gotCompletion = true; cancelled = event.cancelled ?? false
@@ -140,7 +164,7 @@ final class CodecWorkerClient {
         if !pending.isEmpty { receive(pending) }
         child.waitUntilExit(); stderrDone.wait(); try? output.fileHandleForReading.close()
         lock.lock(); process = nil; let cancellationRequested = requestedCancellation; lock.unlock()
-        let complete = gotCompletion && !protocolError && child.terminationStatus == 0 && rowIDs.count == CodecBench.encodeCaseCount + CodecBench.decodeCaseCount
+        let complete = gotCompletion && !protocolError && child.terminationStatus == 0 && rowIDs == expectedCaseIDs
         let wasCancelled = cancelled || (!complete && cancellationRequested)
         let message = complete ? (wasCancelled ? "已取消，保留已完成的结果" : "本轮测试完成")
             : "测试进程未完整结束（退出码 \(child.terminationStatus)），保留已完成结果和驱动错误"

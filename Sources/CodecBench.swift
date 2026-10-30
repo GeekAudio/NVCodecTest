@@ -750,6 +750,17 @@ enum CodecBench {
     static func runAll(progress: @escaping (Double, String) -> Void,
                        onRow: ((BenchRow) -> Void)? = nil,
                        cancellation: BenchCancellation? = nil) -> [BenchRow] {
+        (try? run(caseIDs: CodecTestPlan.allCaseIDSet, progress: progress,
+                  onRow: onRow, cancellation: cancellation)) ?? []
+    }
+
+    /// Runs only the selected visible cases, in the same stable order as the nine-card grid.
+    /// Decode input preparation may encode a private source clip but never emits an extra result row.
+    static func run(caseIDs requestedIDs: Set<String>,
+                    progress: @escaping (Double, String) -> Void,
+                    onRow: ((BenchRow) -> Void)? = nil,
+                    cancellation: BenchCancellation? = nil) throws -> [BenchRow] {
+        let selectedIDs = try CodecTestPlan.validate(Array(requestedIDs))
         var rows: [BenchRow] = []
         let cases: [EncCase] = [
             EncCase(codec: h264, w: 1920, h: 1080, frames: 120, bitrate: 8_000_000, mode: .forcedHW),
@@ -760,7 +771,7 @@ enum CodecBench {
             EncCase(codec: hevc, w: 3840, h: 2160, frames: 48, bitrate: 30_000_000, mode: .forcedHW),
         ]
         let decodeCases: [(CMVideoCodecType, DecodeMode)] = [(h264, .forcedHW), (h264, .software), (hevc, .forcedHW)]
-        let total = Double(cases.count + decodeCases.count)
+        let total = Double(selectedIDs.count)
         var sources: [CMVideoCodecType: BenchOutcome] = [:]
         func pendingAfterCancellation() -> BenchOutcome {
             var result = BenchOutcome()
@@ -768,23 +779,30 @@ enum CodecBench {
             result.errorText = "用户已取消，本项尚未开始"
             return result
         }
-        for c in cases {
-            let label = "编码 \(c.label) · \(c.mode.rawValue)"
-            let base = Double(rows.count)
-            progress(base / total, label)
-            let result: BenchOutcome
-            if cancellation?.isCancelled == true {
-                result = pendingAfterCancellation()
-            } else {
-                result = encode(codec: c.codec, width: c.w, height: c.h, frames: c.frames,
-                    mode: c.mode, bitrate: c.bitrate, cancellation: cancellation,
-                    progress: { fraction, phase in progress((base + fraction) / total, label + " · " + phase) })
+        for caseID in selectedIDs {
+            if let c = cases.first(where: { CodecTestPlan.id(group: "编码", item: $0.label, mode: $0.mode.rawValue) == caseID }) {
+                let label = "编码 \(c.label) · \(c.mode.rawValue)"
+                let base = Double(rows.count)
+                progress(base / total, label)
+                let result: BenchOutcome
+                if cancellation?.isCancelled == true {
+                    result = pendingAfterCancellation()
+                } else {
+                    result = encode(codec: c.codec, width: c.w, height: c.h, frames: c.frames,
+                        mode: c.mode, bitrate: c.bitrate, cancellation: cancellation,
+                        progress: { fraction, phase in progress((base + fraction) / total, label + " · " + phase) })
+                }
+                if result.ok && c.w == 1920 && sources[c.codec] == nil { sources[c.codec] = result }
+                let row = makeRow(group: "编码", item: c.label, mode: c.mode.rawValue, result: result)
+                rows.append(row); onRow?(row)
+                continue
             }
-            if result.ok && c.w == 1920 && sources[c.codec] == nil { sources[c.codec] = result }
-            let row = makeRow(group: "编码", item: c.label, mode: c.mode.rawValue, result: result)
-            rows.append(row); onRow?(row)
-        }
-        for (codec, mode) in decodeCases {
+
+            guard let (codec, mode) = decodeCases.first(where: { codec, mode in
+                CodecTestPlan.id(group: "解码", item: "\(codecName(codec)) 1080p", mode: mode.rawValue) == caseID
+            }) else {
+                throw CodecTestPlan.SelectionError.unknown(caseID)
+            }
             let label = "解码 \(codecName(codec)) 1080p · \(mode.rawValue)"
             let base = Double(rows.count)
             progress(base / total, label)
@@ -793,13 +811,14 @@ enum CodecBench {
                 result = pendingAfterCancellation()
             } else {
                 var preparationFraction = 0.0
-                // 素材可来自软编，无法硬编不能被当成不能硬解。
+                // 未选择编码项时用软件准备输入，不隐式触发一次未勾选的硬件编码。
                 if sources[codec] == nil {
                     preparationFraction = 0.25
                     sources[codec] = encode(codec: codec, width: 1920, height: 1080, frames: 120,
-                        mode: .auto, bitrate: 8_000_000, repeats: 1, cancellation: cancellation,
+                        mode: .software, bitrate: 8_000_000, repeats: 1, cancellation: cancellation,
                         progress: { fraction, phase in
-                            progress((base + fraction * 0.25) / total, label + " · 生成独立素材 · " + phase)
+                            progress((base + fraction * preparationFraction) / total,
+                                     label + " · 软件准备解码素材 · " + phase)
                         })
                 }
                 if cancellation?.isCancelled == true {

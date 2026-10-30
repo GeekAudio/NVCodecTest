@@ -101,6 +101,26 @@ struct ResultSemanticsTests {
         check(untestedText.contains("编码：未测试") && untestedText.contains("· 未测试"),
               "text report never turns an untested row into hardware failure")
 
+        // 选择一项时，总状态与报告范围以本轮计划为准，不再套用九项矩阵。
+        let oneCase = [nvidiaEncode.id]
+        check(SelfTest.runState([nvidiaEncode], plannedCaseIDs: oneCase) == "单项测试完成",
+              "one selected and completed test is a completed single-item run")
+        check(SelfTest.runState([notTested], plannedCaseIDs: [notTested.id]) == "尚未测试（0/1 项）",
+              "selected placeholder does not masquerade as a completed measurement")
+        check(SelfTest.runState([nvidiaEncode], plannedCaseIDs: [nvidiaEncode.id, nvidiaDecode.id])
+              == "部分结果（完成 1/2 项）", "a missing selected case remains a partial selection run")
+        check(SelfTest.runState([nvidiaEncode], plannedCaseIDs: [nvidiaEncode.id, nvidiaEncode.id])
+              == "部分结果（完成 1/2 项）", "duplicate selected IDs cannot claim completion")
+        let unselectedCancelled = row(group: "解码", item: "HEVC 1080p", status: .cancelled, ok: false, hardware: nil)
+        check(SelfTest.runState([nvidiaEncode, unselectedCancelled], plannedCaseIDs: oneCase) == "单项测试完成",
+              "an unselected cancelled row does not alter this selected run")
+        check(SelfTest.runState([cancelled], plannedCaseIDs: [cancelled.id]) == "已取消，已完成 0/1 项",
+              "selected cancellation is not reported as a pass")
+        let selectedText = SelfTest.renderText(env: [], encoders: [], results: [nvidiaEncode], plannedCaseIDs: oneCase)
+        check(selectedText.contains("状态：单项测试完成")
+              && selectedText.contains("单项测试：编码 · H.264 1080p · 强制硬件"),
+              "text report names the single selected test and avoids a nine-item implication")
+
         // JSON 必须无损保存证据与统计，尤其不能把 UInt64 registry ID 变成浮点数。
         var statistics = BenchStatistics()
         statistics.frames = 120
@@ -190,6 +210,14 @@ struct ResultSemanticsTests {
               "nested report results retain GPU and statistical evidence")
         check(!nilDriverReport.methodology.isEmpty && nilDriverReport.target.contains("NVIDIA"),
               "report includes its declared workload and target")
+        let selectedJSON = try SelfTest.renderJSON(env: environment, encoders: encoders,
+            results: [detailedRow], driverReport: nil, environmentDate: capturedAt,
+            plannedCaseIDs: [detailedRow.id])
+        let selectedReport = try reportJSON(selectedJSON)
+        check(selectedReport.schemaVersion == 1 && selectedReport.plannedCaseIDs == [detailedRow.id]
+              && selectedReport.results.count == 1 && selectedReport.runState == "单项测试完成",
+              "single-item JSON records its explicit plan while retaining schema compatibility")
+        check(!selectedReport.wasCancelled, "a successful selected item is not marked cancelled")
         let earlyCancelledJSON = try SelfTest.renderJSON(env: environment, encoders: encoders,
             results: allUntested, driverReport: nil, environmentDate: capturedAt, wasCancelled: true)
         let earlyCancelledReport = try reportJSON(earlyCancelledJSON)
@@ -241,6 +269,12 @@ struct ResultSemanticsTests {
         let loadedReport = try SelfTest.loadJSON(path: reportURL.path)
         check(loadedReport.results[0].id == detailedRow.id && loadedReport.environmentCapturedAt == capturedAt,
               "file reload uses the same report schema and environment snapshot")
+        var legacyReportObject = try JSONSerialization.jsonObject(with: Data(driverJSON.utf8)) as! [String: Any]
+        legacyReportObject.removeValue(forKey: "plannedCaseIDs")
+        let legacyReportData = try JSONSerialization.data(withJSONObject: legacyReportObject)
+        let legacyReport = try reportJSON(String(decoding: legacyReportData, as: UTF8.self))
+        check(legacyReport.plannedCaseIDs == nil && legacyReport.schemaVersion == 1,
+              "a schema-1 report created before selections decodes with the legacy full-matrix meaning")
         var unsupported = try JSONSerialization.jsonObject(with: Data(driverJSON.utf8)) as! [String: Any]
         unsupported["schemaVersion"] = 999
         try JSONSerialization.data(withJSONObject: unsupported).write(to: reportURL)

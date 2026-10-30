@@ -19,33 +19,32 @@ enum CodecPresentation {
             return ("路径待确认", .statusWarning)
         }
     }
-    static let plan: [BenchRow] = [
-        ("编码", "H.264 1080p", "强制硬件"), ("编码", "H.264 1080p", "软件编码"),
-        ("编码", "H.264 4K", "强制硬件"), ("编码", "HEVC 1080p", "强制硬件"),
-        ("编码", "HEVC 1080p", "软件编码"), ("编码", "HEVC 4K", "强制硬件"),
-        ("解码", "H.264 1080p", "强制硬件"), ("解码", "H.264 1080p", "软件解码"),
-        ("解码", "HEVC 1080p", "强制硬件")
-    ].map { BenchRow(group: $0.0, item: $0.1, mode: $0.2, ok: false, fps: 0, engine: "", detail: "尚未测试", status: .notTested) }
+    static let plan: [BenchRow] = CodecTestPlan.cases.map {
+        BenchRow(group: $0.group, item: $0.item, mode: $0.mode, ok: false, fps: 0, engine: "", detail: "尚未测试", status: .notTested)
+    }
 }
 
 struct TestOverview: View {
     let rows: [BenchRow]
+    let plan: [BenchRow]
     let completed: Int
     let total: Int
     let finished: Bool
     let cancelled: Bool
+    let running: Bool
     private var passed: Int { rows.filter { $0.ok && $0.status == .passed }.count }
     private var failed: Int { rows.filter { $0.status == .failed }.count }
     private var summary: String {
         if cancelled { return "已取消" }
+        if total == 0 { return "请选择测试项目" }
         if rows.isEmpty { return "3 次测量 · FPS 中位数" }
-        return "\(passed) 通过" + (failed > 0 ? " · \(failed) 失败" : finished ? "" : " · 进行中") + " · 3 次中位数"
+        return "\(passed) 通过" + (failed > 0 ? " · \(failed) 失败" : "") + (running ? " · 进行中" : finished ? "" : " · 未完成") + " · 3 次中位数"
     }
     var body: some View {
         HStack(spacing: 16) {
-            OverviewPath(title: "硬件编码", group: "编码", rows: rows, expected: 4)
+            OverviewPath(title: "硬件编码", group: "编码", rows: rows, plan: plan)
             Hairline(axis: .vertical).frame(height: 28)
-            OverviewPath(title: "硬件解码", group: "解码", rows: rows, expected: 2)
+            OverviewPath(title: "硬件解码", group: "解码", rows: rows, plan: plan)
             Spacer(minLength: 12)
             VStack(alignment: .trailing, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -62,11 +61,14 @@ private struct OverviewPath: View {
     let title: String
     let group: String
     let rows: [BenchRow]
-    let expected: Int
+    let plan: [BenchRow]
+    private var hardwarePlan: [BenchRow] { plan.filter { $0.group == group && $0.mode == "强制硬件" } }
+    private var expected: Int { hardwarePlan.count }
     private var hardwareRows: [BenchRow] { rows.filter { $0.group == group && $0.mode == "强制硬件" } }
     private var passed: Int { hardwareRows.filter { $0.ok && $0.status == .passed }.count }
     private var confirmed: Int { hardwareRows.filter { $0.ok && $0.isNVIDIAConfirmed }.count }
     private var identity: String {
+        if expected == 0 { return "本轮未选" }
         if confirmed > 0 { return "NVIDIA \(confirmed) 项" }
         let other = hardwareRows.filter { $0.ok && $0.status == .passed && $0.attribution == .otherHardware }.count
         if other > 0 { return "其他 GPU \(other) 项" }
@@ -74,6 +76,7 @@ private struct OverviewPath: View {
         return hardwareRows.isEmpty ? "待测" : "未证实"
     }
     private func count(_ format: String) -> Int { hardwareRows.filter { $0.item.hasPrefix(format) && $0.ok && $0.status == .passed }.count }
+    private func expectedCount(_ format: String) -> Int { hardwarePlan.filter { $0.item.hasPrefix(format) }.count }
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -81,7 +84,7 @@ private struct OverviewPath: View {
                 Text("\(passed)/\(expected)").font(DesignTokens.Font.title1.weight(.medium).monospacedDigit())
                 Text(identity).font(DesignTokens.Font.small).foregroundColor(.txt)
             }
-            Text("H.264 \(count("H.264"))/\(expected / 2) · HEVC \(count("HEVC"))/\(expected / 2)")
+            Text("H.264 \(count("H.264"))/\(expectedCount("H.264")) · HEVC \(count("HEVC"))/\(expectedCount("HEVC"))")
                 .font(DesignTokens.Font.small).foregroundColor(.sub)
         }.fixedSize()
     }
@@ -127,6 +130,10 @@ struct CodecCaseCard: View {
     let selected: Bool
     let active: Bool
     let phase: String
+    @Binding var included: Bool
+    let selectionEnabled: Bool
+    let canRunSingle: Bool
+    let runSingle: () -> Void
     let action: () -> Void
     private var status: (String, Color) { CodecPresentation.classification(row) }
     private var statusSymbol: String {
@@ -138,16 +145,28 @@ struct CodecCaseCard: View {
         [row.group, row.item, row.mode, active ? "正在测量" : status.0].joined(separator: " ")
     }
     var body: some View {
-        Button(action: action) { cardSurface }
-            .buttonStyle(CardButtonStyle(selected: selected, measuring: active))
-            .accessibilityLabel(Text(accessibilityTitle))
-            .accessibilityValue(Text(row.ok ? String(format: "%.1f FPS", row.fps) : "无测量值"))
-            .accessibilityAddTraits(selected ? .isSelected : [])
-            .help(row.detail)
+        ZStack(alignment: .topLeading) {
+            Button(action: action) { cardSurface }
+                .buttonStyle(CardButtonStyle(selected: selected, measuring: active))
+                .accessibilityLabel(Text(accessibilityTitle))
+                .accessibilityValue(Text(row.ok ? String(format: "%.1f FPS", row.fps) : "无测量值"))
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .help(row.detail)
+            Toggle("加入测试：\(row.group) \(row.item) \(row.mode)", isOn: $included)
+                .labelsHidden().toggleStyle(CheckboxToggleStyle()).controlSize(.small)
+                .disabled(!selectionEnabled).padding(8)
+                .help("勾选后加入下一轮测试")
+        }
+        .contextMenu {
+            Button("单独测试此项", action: runSingle).disabled(!canRunSingle)
+            Divider()
+            Button(included ? "取消选择此项" : "选择此项") { included.toggle() }.disabled(!selectionEnabled)
+        }
     }
     private var cardSurface: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
+                Spacer().frame(width: 16)
                 Text(row.item).font(DesignTokens.Font.body.weight(.semibold)).foregroundColor(.txt)
                     .lineLimit(1).layoutPriority(1)
                 Spacer(minLength: 0)

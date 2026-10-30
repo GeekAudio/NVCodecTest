@@ -14,6 +14,8 @@ struct CodecReport: Codable {
     let driverReport: DriverReport?
     let declaredDecoderCapabilities: EnvProbe.DecCaps?
     let encoders: [EncoderRow]
+    /// nil 表示旧格式报告按原始九项矩阵解读；指定数组时只统计该轮勾选的项目。
+    let plannedCaseIDs: [String]?
     let results: [BenchRow]
     let methodology: String
 }
@@ -37,7 +39,35 @@ enum SelfTest {
         return formatter.string(from: date)
     }
 
-    static func runState(_ rows: [BenchRow], wasCancelled: Bool = false) -> String {
+    static func runState(_ rows: [BenchRow], wasCancelled: Bool = false, plannedCaseIDs: [String]? = nil) -> String {
+        if let plannedCaseIDs {
+            let uniqueIDs = Set(plannedCaseIDs)
+            let byID = Dictionary(grouping: rows, by: \.id)
+            let selected = plannedCaseIDs.compactMap { id -> BenchRow? in
+                guard let matches = byID[id], matches.count == 1 else { return nil }
+                return matches[0]
+            }
+            let plannedIDSet = Set(plannedCaseIDs)
+            let finished = plannedIDSet.reduce(into: 0) { count, id in
+                guard byID[id]?.count == 1, let row = byID[id]?.first,
+                      row.status != .notTested, row.status != .cancelled else { return }
+                count += 1
+            }
+            let cancelled = wasCancelled || rows.contains { plannedIDSet.contains($0.id) && $0.status == .cancelled }
+            if cancelled {
+                return "已取消，已完成 \(finished)/\(plannedCaseIDs.count) 项"
+            }
+            guard !plannedCaseIDs.isEmpty, uniqueIDs.count == plannedCaseIDs.count,
+                  selected.count == plannedCaseIDs.count else {
+                return "部分结果（完成 \(finished)/\(plannedCaseIDs.count) 项）"
+            }
+            if selected.contains(where: { $0.status == .notTested }) {
+                return finished == 0 ? "尚未测试（0/\(plannedCaseIDs.count) 项）"
+                    : "部分结果（完成 \(finished)/\(plannedCaseIDs.count) 项）"
+            }
+            if plannedCaseIDs.count == 1 { return "单项测试完成" }
+            return "所选测试完成（\(plannedCaseIDs.count) 项）"
+        }
         if wasCancelled { return "已取消，保留部分结果" }
         if rows.isEmpty { return "环境诊断，尚未测试" }
         if rows.contains(where: { $0.status == .cancelled }) { return "已取消，保留部分结果" }
@@ -74,10 +104,25 @@ enum SelfTest {
         }
     }
 
+    private static func planDescription(_ plannedCaseIDs: [String]?, results: [BenchRow]) -> String? {
+        guard let plannedCaseIDs else { return nil }
+        let rowsByID = Dictionary(grouping: results, by: \.id)
+        let names = plannedCaseIDs.map { id -> String in
+            guard let row = rowsByID[id]?.first else { return id }
+            return "\(row.group) · \(row.item) · \(row.mode)"
+        }
+        if plannedCaseIDs.count == 1, let name = names.first { return "单项测试：\(name)" }
+        if plannedCaseIDs.isEmpty { return "本轮未选择测试项目" }
+        return "本轮选择：\(names.joined(separator: "；"))（\(plannedCaseIDs.count) 项）"
+    }
+
     static func renderText(env: [EnvRow], encoders: [EncoderRow], results: [BenchRow],
-                           driverReport: DriverReport? = nil, environmentDate: Date? = nil, wasCancelled: Bool = false) -> String {
+                           driverReport: DriverReport? = nil, environmentDate: Date? = nil, wasCancelled: Bool = false,
+                           plannedCaseIDs: [String]? = nil) -> String {
         var lines = ["GPU-Z · NVIDIA 编解码诊断 · v\(version)", "导出时间：\(stampHuman())",
-                     "状态：\(runState(results, wasCancelled: wasCancelled))", "目标：黑苹果 NVIDIA / NullMoth 硬件编解码能力"]
+                     "状态：\(runState(results, wasCancelled: wasCancelled, plannedCaseIDs: plannedCaseIDs))",
+                     "目标：黑苹果 NVIDIA / NullMoth 硬件编解码能力"]
+        if let description = planDescription(plannedCaseIDs, results: results) { lines.append(description) }
         if let date = environmentDate { lines.append("环境采集时间：\(stampHuman(date))") }
         lines += ["", "【NVIDIA 结论】", "编码：" + verdict(group: "编码", rows: results),
                   "解码：" + verdict(group: "解码", rows: results),
@@ -133,11 +178,14 @@ enum SelfTest {
     }
 
     static func renderJSON(env: [EnvRow], encoders: [EncoderRow], results: [BenchRow],
-                           driverReport: DriverReport? = nil, environmentDate: Date? = nil, wasCancelled: Bool = false, decoderCapabilities: EnvProbe.DecCaps? = nil) throws -> String {
+                           driverReport: DriverReport? = nil, environmentDate: Date? = nil, wasCancelled: Bool = false,
+                           decoderCapabilities: EnvProbe.DecCaps? = nil, plannedCaseIDs: [String]? = nil) throws -> String {
         let report = CodecReport(schemaVersion: 1, appVersion: version, createdAt: Date(),
             environmentCapturedAt: environmentDate, target: "Hackintosh NVIDIA / NullMoth VideoToolbox",
-            runState: runState(results, wasCancelled: wasCancelled), wasCancelled: wasCancelled || results.contains { $0.status == .cancelled }, environment: env, driverReport: driverReport, declaredDecoderCapabilities: decoderCapabilities,
-            encoders: encoders, results: results, methodology: CodecBench.measurementDescription)
+            runState: runState(results, wasCancelled: wasCancelled, plannedCaseIDs: plannedCaseIDs),
+            wasCancelled: wasCancelled || results.contains { $0.status == .cancelled }, environment: env,
+            driverReport: driverReport, declaredDecoderCapabilities: decoderCapabilities,
+            encoders: encoders, plannedCaseIDs: plannedCaseIDs, results: results, methodology: CodecBench.measurementDescription)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         encoder.dateEncodingStrategy = .iso8601
@@ -236,18 +284,22 @@ enum SelfTest {
 final class RunLogRecorder {
     let store: DiagnosticLogStore
     private let session: DiagnosticLogSession
+    var id: String { session.id }
     private let queue = DispatchQueue(label: "com.geekaudio.NVCodecTest.diagnostic-log", qos: .utility,
                                       autoreleaseFrequency: .workItem)
     private let onError: (String) -> Void
+    private let plannedCaseIDs: [String]?
     private var snapshot: EnvironmentSnapshot?
     private var rows: [BenchRow] = []
     private var lastPhase = ""
     private var lastProgressTime: TimeInterval = 0
     private var reportedError = false
 
-    init(store: DiagnosticLogStore, kind: String, onError: @escaping (String) -> Void) throws {
+    init(store: DiagnosticLogStore, kind: String, plannedCaseIDs: [String]? = nil,
+         onError: @escaping (String) -> Void) throws {
         self.store = store
         self.onError = onError
+        self.plannedCaseIDs = plannedCaseIDs
         session = try store.begin(kind: kind, version: SelfTest.version)
         try session.event(message: "正在采集本轮环境", phase: "environment")
     }
@@ -320,7 +372,8 @@ final class RunLogRecorder {
         }
         return try SelfTest.renderJSON(env: snapshot.rows, encoders: snapshot.encoders, results: rows,
                                       driverReport: snapshot.driver, environmentDate: snapshot.capturedAt,
-                                      wasCancelled: cancelled, decoderCapabilities: snapshot.decoderCaps)
+                                      wasCancelled: cancelled, decoderCapabilities: snapshot.decoderCaps,
+                                      plannedCaseIDs: plannedCaseIDs)
     }
 
     private func persist(_ operation: () throws -> Void) {

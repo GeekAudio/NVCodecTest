@@ -11,6 +11,7 @@ SESSION_CORE_SOURCES=(
   "$SESSION_PROJECT_DIRECTORY/Sources/BenchModels.swift"
   "$SESSION_PROJECT_DIRECTORY/Sources/NullMothContract.swift"
   "$SESSION_PROJECT_DIRECTORY/Sources/EnvProbe.swift"
+  "$SESSION_PROJECT_DIRECTORY/Sources/CodecTestPlan.swift"
   "$SESSION_PROJECT_DIRECTORY/Sources/CodecBench.swift"
 )
 SESSION_FRAMEWORKS=(-framework Foundation -framework CoreMedia -framework Metal -framework VideoToolbox -framework CoreVideo -framework IOKit)
@@ -26,6 +27,7 @@ swiftc -swift-version 5 -target "$(uname -m)-apple-macos11.0" -D MODEL_COUNT_ONL
   "$SESSION_PROJECT_DIRECTORY/Sources/CodecWorker.swift" \
   "$SESSION_PROJECT_DIRECTORY/Sources/Reporting.swift" \
   "$SESSION_PROJECT_DIRECTORY/Sources/Feedback.swift" \
+  "$SESSION_PROJECT_DIRECTORY/Sources/TestHistory.swift" \
   "$SESSION_PROJECT_DIRECTORY/Sources/TestModel.swift" \
   "$SESSION_TEST_DIRECTORY/SessionEvidenceTests.swift" \
   -o "$SESSION_TEST_TEMP/encoder-model-tests" "${SESSION_FRAMEWORKS[@]}" -framework AppKit -framework SwiftUI

@@ -4,7 +4,7 @@
 
 **[下载与版本说明](https://github.com/GeekAudio/NVCodecTest/releases)**
 
-v1.5.0 是本地开发版，尚未发布。应用显示名称改为 GPU-Z，并调整了日志与反馈页面；下载入口仍指向原有 NVCodecTest Releases。
+v1.6.0 加入测试项目选择、单项测试和自动更新，底部可直接打开 GitHub。应用显示名称为 GPU-Z；下载入口仍指向原有 NVCodecTest Releases。
 
 应用继续使用原 bundle identifier 和 `~/Library/Application Support/NVCodecTest/Diagnostics` 日志目录，因此升级后仍能查看既有本机记录。主窗口保留九项测试卡片与本机环境栏；完整证据、测量方法、日志与反馈使用弹窗。
 
@@ -15,6 +15,12 @@ v1.5.0 是本地开发版，尚未发布。应用显示名称改为 GPU-Z，并�
 ## 怎么用
 
 下载 DMG，把 App 拖进“应用程序”，打开后点“开始测试”。软件 HEVC 比较慢，整轮可能要几分钟，也可以中途取消。
+
+九宫格默认全选。卡片左上角可逐项勾选，也能点“全选”“取消全选”，或按硬件、软件、编码、解码批量选择。点卡片后，用下方“单独测试”只运行这一项；右键菜单也能单跑。每轮重新记录结果，进度和报告按本轮范围统计，未选择的项目不会算作失败。单跑解码时会用软件准备输入素材，这一步属于解码准备，不另算一项编码测试；软件 HEVC 素材准备可能需要一些时间。
+
+启动时会检查 GitHub 正式新版，提供“更新”“跳过此版本”；也可从 GPU-Z 菜单手动“检查更新…”。下载显示实际进度，校验后安装并重启；跳过只影响该版本。自动更新需要把应用放在可写的“应用程序”目录，测试过程中不会开始安装。
+
+底部“测试历史”可以选一轮本机记录，对照当前测试的 FPS。相同项目、负载与已确认设备才计算变化，不一致或归属未确认时会说明原因。历史沿用本机诊断日志的保留范围（最近 20 条记录、30 天、合计不超过 20 MiB），只读查看，不会上传。
 
 首次被系统拦住，先关闭提示，再到“系统设置 → 隐私与安全性”点“仍要打开”。
 
@@ -52,6 +58,8 @@ v1.5.0 是本地开发版，尚未发布。应用显示名称改为 GPU-Z，并�
 ./Tests/run-source-contract-tests.sh
 ./Tests/run-worker-tests.sh
 ./Tests/run-session-evidence-tests.sh
+./Tests/run-selection-model-tests.sh
+./Tests/run-app-update-tests.sh
 ```
 
 App 包含 Intel 和 Apple Silicon 两种架构。NVIDIA / NullMoth 检测主要给 Intel 黑苹果用；Apple Silicon 可以测系统编解码器作为对照。

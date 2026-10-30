@@ -49,6 +49,9 @@ final class TestModel: ObservableObject {
     @Published var hevcDec = false
     @Published var declaredDecoderCapabilities: EnvProbe.DecCaps?
     @Published var results: [BenchRow] = []
+    @Published private(set) var selectedCaseIDs = Set(CodecTestPlan.allCaseIDs)
+    /// 本轮执行范围独立于下一轮勾选；旧报告缺少计划时仍按完整矩阵解释。
+    @Published var plannedCaseIDs: [String]?
     @Published var running = false
     @Published var finished = false
     @Published var refreshing = false
@@ -59,15 +62,20 @@ final class TestModel: ObservableObject {
     @Published var lastEnvironmentDate: Date?
     @Published var diagnosticStore: DiagnosticLogStore?
     @Published var diagnosticLogError: String?
+    @Published private(set) var lastRunDiagnosticID: String?
+    private var lastRunStartedAt: Date?
 
     private var workerClient: CodecWorkerClient?
     private var activeLog: RunLogRecorder?
     private var refreshGeneration = UUID()
     private let recordsDiagnostics: Bool
+    private let makeWorker: ([String]) -> CodecWorkerClient
 
     /// 正常窗口异步采集；截图、fixture 可关闭自动采集，再显式同步加载。
-    init(loadImmediately: Bool = true, recordDiagnostics: Bool = true) {
+    init(loadImmediately: Bool = true, recordDiagnostics: Bool = true,
+         makeWorker: @escaping ([String]) -> CodecWorkerClient = { CodecWorkerClient(arguments: $0) }) {
         recordsDiagnostics = recordDiagnostics
+        self.makeWorker = makeWorker
         if loadImmediately { refresh() }
     }
 
@@ -92,6 +100,9 @@ final class TestModel: ObservableObject {
         guard !running && !refreshing else { return }
         refreshing = true
         results = []
+        plannedCaseIDs = nil
+        lastRunDiagnosticID = nil
+        lastRunStartedAt = nil
         finished = false
         wasCancelled = false
         cancelRequested = false
@@ -127,10 +138,18 @@ final class TestModel: ObservableObject {
     var encodeRows: [BenchRow] { results.filter { $0.group == "编码" } }
     var decodeRows: [BenchRow] { results.filter { $0.group == "解码" } }
     var tested: Bool { !results.isEmpty }
-    var canStart: Bool { !running && !refreshing && !env.isEmpty }
+    var canRun: Bool { !running && !refreshing && !env.isEmpty }
+    var canStart: Bool { canRun && !selectedCaseIDs.isEmpty }
     var canExport: Bool { !running && !refreshing && !env.isEmpty }
-    var totalCases: Int { CodecBench.encodeCaseCount + CodecBench.decodeCaseCount }
-    var completedCount: Int { results.filter { $0.status != .notTested && $0.status != .cancelled }.count }
+    var displayedCaseIDs: Set<String> {
+        if let plannedCaseIDs { return Set(plannedCaseIDs) }
+        if running || finished || wasCancelled || !results.isEmpty {
+            return Set(CodecTestPlan.allCaseIDs)
+        }
+        return selectedCaseIDs
+    }
+    var totalCases: Int { displayedCaseIDs.count }
+    var completedCount: Int { results.filter { displayedCaseIDs.contains($0.id) && $0.status != .notTested && $0.status != .cancelled }.count }
     var hwEncodeOK: Bool { encodeRows.contains { $0.ok && $0.hardwareAccelerated == true } }
     var hwDecodeOK: Bool { decodeRows.contains { $0.ok && $0.hardwareAccelerated == true } }
     var nvidiaEncodeOK: Bool { encodeRows.contains { ResultCategory.nvidia.includes($0) } }
@@ -140,10 +159,28 @@ final class TestModel: ObservableObject {
         results.filter { category.includes($0) && (group == nil || $0.group == group) }
     }
 
-    func start() {
-        guard canStart else { return }
-        let client = CodecWorkerClient()
+    func selectCases(_ ids: Set<String>) {
+        guard !running else { return }
+        selectedCaseIDs = ids.intersection(CodecTestPlan.allCaseIDs)
+    }
+
+    func setCase(_ id: String, included: Bool) {
+        guard !running, CodecTestPlan.allCaseIDs.contains(id) else { return }
+        if included { selectedCaseIDs.insert(id) } else { selectedCaseIDs.remove(id) }
+    }
+
+    func start() { start(caseIDs: selectedCaseIDs) }
+
+    func startSingle(_ id: String) { start(caseIDs: [id]) }
+
+    private func start(caseIDs: Set<String>) {
+        guard canRun, let plan = try? CodecTestPlan.validate(Array(caseIDs)),
+              let arguments = try? CodecTestPlan.arguments(for: Set(plan)) else { return }
+        let client = makeWorker(["--codec-worker"] + arguments)
         workerClient = client
+        plannedCaseIDs = plan
+        lastRunStartedAt = Date()
+        lastRunDiagnosticID = nil
         running = true
         finished = false
         cancelRequested = false
@@ -152,9 +189,10 @@ final class TestModel: ObservableObject {
         progress = 0
         status = "准备测试会话…"
         let existingStore = diagnosticStore
+        let kind = plan.count == CodecTestPlan.allCaseIDs.count ? "完整测试" : (plan.count == 1 ? "单项测试" : "所选项目测试")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let log = self?.makeLog(existing: existingStore, kind: "完整测试")
-            DispatchQueue.main.async { self?.activeLog = log }
+            let log = self?.makeLog(existing: existingStore, kind: kind, plannedCaseIDs: plan)
+            DispatchQueue.main.async { self?.activeLog = log; self?.lastRunDiagnosticID = log?.id }
             let completion = client.run(onEvent: { event in
                 if let snapshot = event.environment {
                     log?.capture(snapshot)
@@ -182,12 +220,13 @@ final class TestModel: ObservableObject {
                 guard let self = self else { return }
                 self.running = false
                 self.wasCancelled = completion.cancelled
-                self.finished = completion.complete && !completion.cancelled
+                self.finished = completion.complete && !completion.cancelled && self.results.count == plan.count
+                    && self.results.allSatisfy { $0.status != .notTested && $0.status != .cancelled }
                 self.cancelRequested = false
                 self.workerClient = nil
                 self.activeLog = nil
                 if completion.complete && !completion.cancelled { self.progress = 1 }
-                self.status = completion.message
+                self.status = completion.complete ? SelfTest.runState(self.results, wasCancelled: completion.cancelled, plannedCaseIDs: plan) : completion.message
             }
         }
     }
@@ -201,7 +240,7 @@ final class TestModel: ObservableObject {
     }
 
     /// 在后台调用；留存失败只提示日志状态，不改变编解码测试结论。
-    private func makeLog(existing: DiagnosticLogStore?, kind: String) -> RunLogRecorder? {
+    private func makeLog(existing: DiagnosticLogStore?, kind: String, plannedCaseIDs: [String]? = nil) -> RunLogRecorder? {
         guard recordsDiagnostics else { return nil }
         do {
             let store = try existing ?? DiagnosticLogStore()
@@ -209,7 +248,7 @@ final class TestModel: ObservableObject {
                 self?.diagnosticStore = store
                 self?.diagnosticLogError = nil
             }
-            return try RunLogRecorder(store: store, kind: kind) { [weak self] message in
+            return try RunLogRecorder(store: store, kind: kind, plannedCaseIDs: plannedCaseIDs) { [weak self] message in
                 DispatchQueue.main.async { self?.diagnosticLogError = "本轮日志未完整留存：" + message }
             }
         } catch {
@@ -227,6 +266,33 @@ final class TestModel: ObservableObject {
         }
     }
 
+    var currentHistoryReport: CodecReport? {
+        guard !env.isEmpty, !results.isEmpty else { return nil }
+        return CodecReport(schemaVersion: 1, appVersion: SelfTest.version,
+            createdAt: lastRunStartedAt ?? lastEnvironmentDate ?? Date(), environmentCapturedAt: lastEnvironmentDate,
+            target: "Hackintosh NVIDIA / NullMoth VideoToolbox",
+            runState: running ? "测试进行中" : SelfTest.runState(results, wasCancelled: wasCancelled, plannedCaseIDs: plannedCaseIDs),
+            wasCancelled: wasCancelled, environment: env, driverReport: driverReport,
+            declaredDecoderCapabilities: declaredDecoderCapabilities, encoders: encoders,
+            plannedCaseIDs: plannedCaseIDs, results: results, methodology: CodecBench.measurementDescription)
+    }
+
+    /// 历史仅从本机已有的结构化诊断记录读取，由 sheet 在后台调用。
+    func testHistoryLoader() -> () throws -> [TestHistoryEntry] {
+        let store = diagnosticStore
+        return {
+            guard let store else { return [] }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try store.entries().compactMap { entry in
+                guard let text = try store.readReport(entry),
+                      let report = try? decoder.decode(CodecReport.self, from: Data(text.utf8)),
+                      report.schemaVersion == 1, !report.results.isEmpty else { return nil }
+                return TestHistoryEntry(id: entry.id, createdAt: entry.createdAt, report: report)
+            }.sorted { $0.createdAt > $1.createdAt }
+        }
+    }
+
     /// 主线程只复制当前值；历史读取和临时报告脱敏由反馈窗口在后台执行。
     func feedbackHistoryLoader() -> () throws -> [FeedbackDiagnostic] {
         let store = diagnosticStore
@@ -234,14 +300,15 @@ final class TestModel: ObservableObject {
         let environment = env, registered = encoders, rows = results
         let driver = driverReport, date = lastEnvironmentDate, caps = declaredDecoderCapabilities
         let cancelled = wasCancelled, isRunning = running
+        let plan = plannedCaseIDs
         return {
             var history = try store.map { try Self.diagnosticHistory(in: $0) } ?? []
             if (history.isEmpty || includeCurrent), !environment.isEmpty {
                 let json = try SelfTest.renderJSON(env: environment, encoders: registered, results: rows,
-                    driverReport: driver, environmentDate: date, wasCancelled: cancelled, decoderCapabilities: caps)
+                    driverReport: driver, environmentDate: date, wasCancelled: cancelled, decoderCapabilities: caps, plannedCaseIDs: plan)
                 history.append(FeedbackDiagnostic(id: "current-report", title: "当前诊断快照", createdAt: Date(),
                     redactedText: json, redactedJSON: json,
-                    summary: isRunning ? "测试进行中，当前为部分结果" : SelfTest.runState(rows, wasCancelled: cancelled),
+                    summary: isRunning ? "测试进行中，当前为部分结果" : SelfTest.runState(rows, wasCancelled: cancelled, plannedCaseIDs: plan),
                     sourceDescription: "由当前窗口生成的脱敏快照"))
             }
             return history
@@ -256,10 +323,10 @@ final class TestModel: ObservableObject {
     var currentFeedbackDiagnostic: FeedbackDiagnostic? {
         guard !env.isEmpty, let report = try? SelfTest.renderJSON(env: env, encoders: encoders, results: results,
             driverReport: driverReport, environmentDate: lastEnvironmentDate, wasCancelled: wasCancelled,
-            decoderCapabilities: declaredDecoderCapabilities), let redacted = try? DiagnosticRedactor.redactJSON(report) else { return nil }
+            decoderCapabilities: declaredDecoderCapabilities, plannedCaseIDs: plannedCaseIDs), let redacted = try? DiagnosticRedactor.redactJSON(report) else { return nil }
         return FeedbackDiagnostic(id: "current-report", title: "当前诊断快照", createdAt: Date(),
                                   redactedText: redacted, redactedJSON: redacted,
-                                  summary: running ? "测试进行中，当前为部分结果" : SelfTest.runState(results, wasCancelled: wasCancelled),
+                                  summary: running ? "测试进行中，当前为部分结果" : SelfTest.runState(results, wasCancelled: wasCancelled, plannedCaseIDs: plannedCaseIDs),
                                   sourceDescription: "由当前窗口生成的脱敏快照")
     }
 
@@ -273,8 +340,8 @@ final class TestModel: ObservableObject {
         do {
             let runState = running ? "测试进行中" : (wasCancelled ? "已取消，保留部分结果" : (finished ? "本轮完成" : "尚未测试"))
             let reportEnvironment = env + [EnvRow("本轮状态", runState)]
-            let text = try asJSON ? SelfTest.renderJSON(env: reportEnvironment, encoders: encoders, results: results, driverReport: driverReport, environmentDate: lastEnvironmentDate, wasCancelled: wasCancelled, decoderCapabilities: declaredDecoderCapabilities)
-                : SelfTest.renderText(env: reportEnvironment, encoders: encoders, results: results, driverReport: driverReport, environmentDate: lastEnvironmentDate, wasCancelled: wasCancelled)
+            let text = try asJSON ? SelfTest.renderJSON(env: reportEnvironment, encoders: encoders, results: results, driverReport: driverReport, environmentDate: lastEnvironmentDate, wasCancelled: wasCancelled, decoderCapabilities: declaredDecoderCapabilities, plannedCaseIDs: plannedCaseIDs)
+                : SelfTest.renderText(env: reportEnvironment, encoders: encoders, results: results, driverReport: driverReport, environmentDate: lastEnvironmentDate, wasCancelled: wasCancelled, plannedCaseIDs: plannedCaseIDs)
             try text.write(to: url, atomically: true, encoding: .utf8)
         } catch {
             let alert = NSAlert(error: error)

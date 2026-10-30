@@ -50,10 +50,12 @@ enum Snapshot {
                 model.encoders = report.encoders
                 model.driverReport = report.driverReport
                 model.declaredDecoderCapabilities = report.declaredDecoderCapabilities
+                model.plannedCaseIDs = report.plannedCaseIDs
                 model.h264Dec = report.declaredDecoderCapabilities?.h264 ?? false
                 model.hevcDec = report.declaredDecoderCapabilities?.hevc ?? false
                 model.lastEnvironmentDate = report.environmentCapturedAt
-                applyResults(report.results, to: model, wasCancelled: report.wasCancelled)
+                applyResults(report.results, to: model, wasCancelled: report.wasCancelled,
+                             plannedCaseIDs: report.plannedCaseIDs)
             } catch {
                 print("snapshot: 报告读取失败：\(error.localizedDescription)")
                 exit(1)
@@ -226,11 +228,17 @@ enum Snapshot {
         return max(minimum, min(maximum, value.rounded()))
     }
 
-    private static func applyResults(_ rows: [BenchRow], to model: TestModel, wasCancelled: Bool = false) {
+    private static func applyResults(_ rows: [BenchRow], to model: TestModel, wasCancelled: Bool = false,
+                                     plannedCaseIDs: [String]? = nil) {
         model.results = rows
-        model.wasCancelled = wasCancelled || rows.contains { $0.status == .cancelled }
-        model.finished = !rows.isEmpty && !model.wasCancelled
-        model.progress = model.wasCancelled ? 0 : (rows.isEmpty ? 0 : 1)
-        model.status = SelfTest.runState(rows, wasCancelled: model.wasCancelled)
+        model.plannedCaseIDs = plannedCaseIDs
+        let expected = Set(plannedCaseIDs ?? CodecTestPlan.allCaseIDs)
+        let scopedRows = rows.filter { expected.contains($0.id) }
+        model.wasCancelled = wasCancelled || scopedRows.contains { $0.status == .cancelled }
+        let completed = scopedRows.filter { $0.status != .notTested && $0.status != .cancelled }.count
+        model.finished = !expected.isEmpty && !model.wasCancelled && scopedRows.count == expected.count
+            && Set(scopedRows.map(\.id)) == expected && completed == expected.count
+        model.progress = expected.isEmpty ? 0 : min(1, Double(completed) / Double(expected.count))
+        model.status = SelfTest.runState(rows, wasCancelled: model.wasCancelled, plannedCaseIDs: plannedCaseIDs)
     }
 }

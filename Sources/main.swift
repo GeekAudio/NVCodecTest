@@ -6,6 +6,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow?
     var model: TestModel?
+    private var updater: AppUpdateCoordinator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let m = TestModel()
@@ -30,7 +31,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window = win
 
         NSApp.activate(ignoringOtherApps: true)
+        let coordinator = AppUpdateCoordinator(version: SelfTest.version) { [weak m, weak win] in
+            win?.isVisible == true && win?.attachedSheet == nil && m?.running == false && m?.refreshing == false
+        }
+        updater = coordinator
+        coordinator.start(attachedTo: win)
     }
+
+    @objc func checkForUpdates(_ sender: Any?) { updater?.checkForUpdates(manual: true) }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
@@ -49,8 +57,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // Metal 与系统探测由 EnvProbe 在后台初始化；主窗口可以立即显示。
 
 if CommandLine.arguments.contains("--codec-worker") {
-    CodecWorker.run()
-    exit(0)
+    exit(CodecWorker.run())
+}
+
+if CommandLine.arguments.contains("--gpu-z-install-helper") {
+    AppUpdateInstallerHelper.run(arguments: CommandLine.arguments)
 }
 
 if CommandLine.arguments.contains("--help") {
@@ -104,6 +115,9 @@ let appSub = NSMenu()
 appSub.addItem(NSMenuItem(title: "关于 GPU-Z",
                           action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
                           keyEquivalent: ""))
+let updateItem = NSMenuItem(title: "检查更新…", action: #selector(AppDelegate.checkForUpdates(_:)), keyEquivalent: "")
+updateItem.target = delegate
+appSub.addItem(updateItem)
 appSub.addItem(NSMenuItem.separator())
 appSub.addItem(NSMenuItem(title: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 appItem.submenu = appSub
