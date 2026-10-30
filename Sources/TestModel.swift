@@ -266,7 +266,7 @@ final class TestModel: ObservableObject {
     func exportReport(asJSON: Bool = false) {
         guard canExport else { return }
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "NVCodecTest-\(SelfTest.stamp())." + (asJSON ? "json" : "txt")
+        panel.nameFieldStringValue = "GPU-Z-\(SelfTest.stamp())." + (asJSON ? "json" : "txt")
         panel.allowedFileTypes = [asJSON ? "json" : "txt"]
         panel.title = results.isEmpty ? "导出环境诊断" : "导出测试报告"
         guard panel.runModal() == .OK, let url = panel.url else { return }

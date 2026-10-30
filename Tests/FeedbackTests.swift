@@ -34,6 +34,7 @@ struct FeedbackTests {
             redactedJSON: "{\"gpuRegistryID\":18446744073709551610,\"hardwareAccelerated\":true}",
             summary: "系统硬件成功，GPU 归属未确认", sourceDescription: "固定 fixture")
         let normal = GitHubFeedback.makeDraft(title: title, problem: problem, diagnostic: diagnostic)
+        check(normal.delivery == .complete, "a complete URL draft reports complete payload delivery")
         check(normal.url != nil, "a small report produces a browser issue draft")
         check(!normal.requiresManualAttachment, "a small report does not request a missing attachment")
         check(normal.body == normal.fullBody, "small reports do not silently lose content")
@@ -41,6 +42,13 @@ struct FeedbackTests {
         check(normal.body.contains(problem), "newlines, punctuation and Chinese survive draft construction")
         check(normal.title.contains("中文") && normal.title.contains("100%"), "title text survives URL escaping")
         validateDestination(normal, maximum: 7000)
+
+        let defaultTitle = GitHubFeedback.makeDraft(title: " \n\t", problem: "未填写标题", diagnostic: nil)
+        check(defaultTitle.title == "GPU-Z 问题反馈", "an empty title uses the GPU-Z brand")
+        check(GitHubFeedback.repository == "GeekAudio/NVCodecTest"
+              && GitHubFeedback.newIssueURL.host == "github.com"
+              && GitHubFeedback.newIssueURL.path == "/GeekAudio/NVCodecTest/issues/new",
+              "GPU-Z branding leaves the GitHub repository and issue endpoint unchanged")
 
         let withoutLog = GitHubFeedback.makeDraft(title: "仅描述问题", problem: "没有可用日志", diagnostic: nil)
         check(withoutLog.url != nil && withoutLog.body.contains("没有可用日志"), "feedback works when logging is unavailable")
@@ -51,6 +59,7 @@ struct FeedbackTests {
             redactedText: String(repeating: "硬件证据 UsingHardware=true，120/120 帧；\n", count: 600) + "LOG_END_SENTINEL",
             redactedJSON: nil, summary: "系统硬解成功，GPU 未确认")
         let large = GitHubFeedback.makeDraft(title: "长日志需要手动附加", problem: "保留这段问题描述", diagnostic: largeLog)
+        check(large.delivery == .summaryOnly, "an oversized log reports summary-only payload delivery")
         check(large.requiresManualAttachment, "oversize diagnostics explicitly require manual attachment")
         check(large.fullBody.contains("LOG_END_SENTINEL"), "full-copy content keeps the end of an oversized log")
         check(!large.body.contains("LOG_END_SENTINEL"), "oversize logs are omitted from the URL rather than partially attached")
@@ -66,6 +75,7 @@ struct FeedbackTests {
         validateDestination(long, maximum: 7000)
 
         let tiny = GitHubFeedback.makeDraft(title: "极小 URL 预算", problem: problem, diagnostic: diagnostic, maxURLBytes: 40)
+        check(tiny.delivery == .manual, "a URL that cannot carry the summary reports manual delivery")
         check(tiny.url == nil, "an impossible URL budget disables opening instead of exceeding its limit")
         check(!tiny.notice.isEmpty && tiny.requiresManualAttachment, "no-URL fallback still exposes a useful manual path")
         check(tiny.fullBody.contains("120/120") && tiny.fullBody.contains(problem), "no-URL fallback retains full reviewable content")

@@ -536,7 +536,7 @@ final class DiagnosticLogStore {
             guard eventsSize <= limits.maxEventsBytes else { throw DiagnosticLogError.eventsLimitReached(limit: limits.maxEventsBytes) }
             let events = fm.fileExists(atPath: url.path) ? try String(contentsOf: url, encoding: .utf8) : ""
             let date = ISO8601DateFormatter().string(from: record.createdAt)
-            var output = "NVCodecTest 诊断日志\n版本：\(record.version.isEmpty ? "未知" : record.version)\n类型：\(record.kind)\n开始：\(date)\n状态：\(record.state.title) (\(record.state.rawValue))\n事件：\(record.eventCount)\n\n【过程事件】\n" + events
+            var output = "GPU-Z 诊断日志\n版本：\(record.version.isEmpty ? "未知" : record.version)\n类型：\(record.kind)\n开始：\(date)\n状态：\(record.state.title) (\(record.state.rawValue))\n事件：\(record.eventCount)\n\n【过程事件】\n" + events
             if let report = try readReport(entry) { output += "\n【完整诊断快照 JSON】\n" + report + "\n" }
             return DiagnosticRedactor.redact(output)
         }

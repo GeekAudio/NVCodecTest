@@ -11,11 +11,10 @@ struct FeedbackView: View {
 
     @Environment(\.presentationMode) private var presentationMode
     @Environment(\.displayScale) private var displayScale
-    @Environment(\.controlActiveState) private var windowState
     private var hairline: CGFloat { 1 / max(displayScale, 1) }
     @State private var historyItems: [FeedbackDiagnostic]
-    @State private var selectedID: String
-    @State private var issueTitle = "NVCodecTest 问题反馈"
+    @State private var selectedID: String?
+    @State private var issueTitle = "GPU-Z 问题反馈"
     @State private var problem = ""
     @State private var previewTab = PreviewTab.draft
     @State private var loading = false
@@ -26,6 +25,12 @@ struct FeedbackView: View {
     @State private var logEditorPresented = false
     @State private var logEditorText = ""
     @State private var logEditorID = ""
+    @State private var draftRevision = 0
+    @State private var draftGeneration = 0
+    @State private var draftWorkItem: DispatchWorkItem?
+    @State private var pendingDraftKey: DraftKey?
+    @State private var cachedDraft: CachedDraft?
+    @State private var draftPending = false
 
     init(currentDiagnostic: FeedbackDiagnostic? = nil, history: [FeedbackDiagnostic] = [],
          refreshHistory: (() throws -> [FeedbackDiagnostic])? = nil,
@@ -38,7 +43,19 @@ struct FeedbackView: View {
         self.storageNotice = storageNotice
         let sorted = history.sorted { $0.createdAt > $1.createdAt }
         _historyItems = State(initialValue: sorted)
-        _selectedID = State(initialValue: sorted.first?.id ?? currentDiagnostic?.id ?? "")
+        _selectedID = State(initialValue: sorted.first?.id ?? currentDiagnostic?.id)
+    }
+
+    private struct DraftKey: Equatable {
+        let title: String
+        let problem: String
+        let selectedID: String?
+        let revision: Int
+    }
+
+    private struct CachedDraft {
+        let key: DraftKey
+        let value: GitHubIssueDraft
     }
 
     private enum PreviewTab: String, CaseIterable, Identifiable {
@@ -76,12 +93,25 @@ struct FeedbackView: View {
     private var usingEditedCopy: Bool {
         originalSelection.map { editedLogs[$0.id] != nil } ?? false
     }
-    private var draft: GitHubIssueDraft {
-        GitHubFeedback.makeDraft(title: issueTitle, problem: problem, diagnostic: selected)
+    private var activeDraftKey: DraftKey {
+        DraftKey(title: issueTitle, problem: problem, selectedID: selected?.id, revision: draftRevision)
     }
-    private var previewText: String {
+    private var readyDraft: GitHubIssueDraft? {
+        guard let cachedDraft, cachedDraft.key == activeDraftKey, !draftPending, !loading else { return nil }
+        return cachedDraft.value
+    }
+    private var listSelection: Binding<String?> {
+        Binding(
+            get: { originalSelection?.id },
+            set: { newID in
+                guard let newID else { return }
+                selectedID = newID
+            }
+        )
+    }
+    private func previewText(for draft: GitHubIssueDraft?) -> String {
         switch previewTab {
-        case .draft: return draft.text
+        case .draft: return draft?.text ?? "正在更新预览…"
         case .full: return selected?.redactedText ?? "尚无脱敏诊断日志。你仍可填写问题现象并预览网页草稿。"
         case .json:
             if usingEditedCopy { return "当前使用删减副本，仅以 TXT 提交。本次禁用原诊断 JSON，避免重新带出已删除内容。" }
@@ -93,17 +123,23 @@ struct FeedbackView: View {
     }
 
     var body: some View {
+        let currentDraft = readyDraft
         VStack(spacing: 0) {
             header
             Hairline()
             HStack(alignment: .top, spacing: 0) {
                 historySidebar.frame(width: 200)
-                    .background(SidebarSurface(blendingMode: .withinWindow))
+                    .background(SidebarSurface())
                 Hairline(axis: .vertical)
-                feedbackBody.padding(20)
+                ScrollView {
+                    feedbackBody(draft: currentDraft)
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             Hairline()
-            footer
+            footer(draft: currentDraft)
         }
         .frame(minWidth: 850, idealWidth: 980, maxWidth: .infinity,
                minHeight: 650, idealHeight: 760, maxHeight: .infinity)
@@ -111,13 +147,34 @@ struct FeedbackView: View {
         .foregroundColor(DesignTokens.Text.primary)
         .background(DesignTokens.Surface.window)
         .buttonStyle(NativeButtonStyle(prominent: false))
-        .onAppear { reloadHistory(firstLoad: true) }
+        .onAppear {
+            scheduleDraftGeneration()
+            reloadHistory(firstLoad: true)
+        }
+        .onDisappear { cancelDraftGeneration() }
+        .onChange(of: issueTitle) { _ in scheduleDraftGeneration() }
+        .onChange(of: problem) { _ in scheduleDraftGeneration() }
+        .onChange(of: selectedID) { _ in
+            draftRevision += 1
+            operationNotice = ""
+            scheduleDraftGeneration()
+        }
+        .onChange(of: currentDiagnostic?.createdAt) { _ in
+            draftRevision += 1
+            scheduleDraftGeneration()
+        }
+        .onChange(of: storageNotice) { _ in
+            draftRevision += 1
+            scheduleDraftGeneration()
+        }
         .alert(item: $activeAlert, content: makeAlert)
         .sheet(isPresented: $logEditorPresented) {
             FeedbackLogEditor(text: logEditorText, original: diagnostics.first { $0.id == logEditorID }) { document in
                 editedLogs[document.id] = document
+                draftRevision += 1
                 previewTab = .full
                 operationNotice = "已应用删减副本；原日志未修改，本次仅以 TXT 提交"
+                scheduleDraftGeneration()
                 logEditorPresented = false
             }
         }
@@ -126,23 +183,23 @@ struct FeedbackView: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "doc.text.magnifyingglass")
-                .font(DesignTokens.Font.title1).foregroundColor(DesignTokens.Text.secondary)
+                .font(DesignTokens.Font.title2).foregroundColor(DesignTokens.Text.secondary)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 4) {
-                Text("日志与 GitHub 反馈").font(DesignTokens.Font.title1.weight(.semibold))
-                Text("默认带上机型、驱动和测试日志摘要，检查后到 GeekAudio/NVCodecTest 网页确认提交。")
+                Text("日志与反馈").font(DesignTokens.Font.title2.weight(.semibold))
+                Text("前往时会把下方草稿交给 GitHub 预填，提交和附件仍由你在网页确认。")
                     .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary)
             }
             Spacer()
             Button("完成") { presentationMode.wrappedValue.dismiss() }
                 .keyboardShortcut(.cancelAction)
-        }.padding(.horizontal, 20).padding(.vertical, 16)
+        }.padding(.horizontal, 16).padding(.vertical, 10)
     }
 
     private var historySidebar: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("本机脱敏记录").font(DesignTokens.Font.body.weight(.semibold))
+                Text("本机脱敏记录").font(DesignTokens.Font.title3)
                 Spacer()
                 if loading { ProgressView().scaleEffect(0.55).frame(width: 18, height: 18) }
                 Button(action: { reloadHistory() }) { Image(systemName: "arrow.clockwise") }
@@ -151,58 +208,53 @@ struct FeedbackView: View {
                     .help("重新读取本机日志，不会运行新的编解码测试")
             }
             if diagnostics.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(loading ? "正在读取…" : "尚无记录").font(DesignTokens.Font.body)
-                    Text("完成环境扫描或测试后会自动记录。也可先填写问题现象。")
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(loading ? "正在读取…" : "尚无记录").font(DesignTokens.Font.body.weight(.medium))
+                    Text("完成环境扫描或测试后，脱敏记录会显示在这里。也可先填写问题说明。")
                         .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary)
-                }.padding(.top, 12)
+                        .fixedSize(horizontal: false, vertical: true)
+                }.padding(.top, 12).padding(.horizontal, 8)
                 Spacer()
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(diagnostics) { diagnostic in
-                            Button(action: { selectedID = diagnostic.id; operationNotice = "" }) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(diagnostic.title).font(DesignTokens.Font.body.weight(.medium))
-                                        .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
-                                    Text(Self.dateString(diagnostic.createdAt)).font(DesignTokens.Font.small)
-                                        .foregroundColor(DesignTokens.Text.secondary)
-                                    if !diagnostic.sourceDescription.isEmpty {
-                                        Text(diagnostic.sourceDescription).font(DesignTokens.Font.small)
-                                            .foregroundColor(DesignTokens.Text.secondary).lineLimit(2)
-                                    }
-                                }
-                                .padding(8).frame(maxWidth: .infinity, alignment: .leading)
-                                .background(ZStack {
-                                    RoundedRectangle(cornerRadius: 7).fill(DesignTokens.Surface.control)
-                                    RoundedRectangle(cornerRadius: 7)
-                                        .fill(DesignTokens.Interaction.selection(active: windowState != .inactive)
-                                            .opacity(selected?.id == diagnostic.id ? 0.10 : 0))
-                                })
-                                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(
-                                    DesignTokens.Stroke.separator, lineWidth: hairline))
-                                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(
-                                    DesignTokens.Text.primary.opacity(selected?.id == diagnostic.id ? 0.08 : 0),
-                                    lineWidth: hairline))
-                            }.accessibilityValue(selected?.id == diagnostic.id ? "已选择" : "未选择")
-                                .accessibilityAddTraits(selected?.id == diagnostic.id ? .isSelected : [])
+                List(selection: listSelection) {
+                    ForEach(diagnostics) { diagnostic in
+                        HStack(spacing: 6) {
+                            Text(diagnostic.title)
+                                .font(DesignTokens.Font.body.weight(.medium))
+                                .lineLimit(1)
+                            Spacer(minLength: 4)
+                            Text(Self.shortTime(diagnostic.createdAt))
+                                .font(DesignTokens.Font.small.monospacedDigit())
+                                .foregroundColor(.secondary)
                         }
+                        .frame(minHeight: 24)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(Text(diagnostic.title + "，" + Self.dateString(diagnostic.createdAt)))
+                        .help(diagnostic.title + "\n" + Self.dateString(diagnostic.createdAt))
+                        .tag(diagnostic.id)
                     }
                 }
+                .listStyle(SidebarListStyle())
+                .modifier(FeedbackListSurface())
+                .environment(\.defaultMinListRowHeight, 28)
+                .foregroundColor(nil)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             if let notice = storageNotice, !notice.isEmpty {
-                HStack(alignment: .top, spacing: 4) {
+                HStack(alignment: .top, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle")
-                        .foregroundColor(DesignTokens.Text.primary).padding(4)
-                        .background(RoundedRectangle(cornerRadius: DesignTokens.controlCorner)
-                            .fill(DesignTokens.Status.warning.opacity(DesignTokens.Status.backgroundOpacity)))
+                        .foregroundColor(DesignTokens.Status.warning)
                         .accessibilityHidden(true)
                     Text("日志留存提示：" + DiagnosticRedactor.redact(notice))
-                        .foregroundColor(DesignTokens.Text.primary)
+                        .foregroundColor(DesignTokens.Text.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }.font(DesignTokens.Font.small)
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: DesignTokens.controlCorner)
+                        .fill(DesignTokens.Status.warning.opacity(DesignTokens.Status.backgroundOpacity)))
             }
-            Text("最近 20 次 · 最长 30 天 · 仅存本机。运行中的记录可能尚无完整报告；此处读取已落盘内容。")
+            Text("最近 20 次 · 最长 30 天 · 仅存本机")
                 .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Menu {
@@ -213,43 +265,98 @@ struct FeedbackView: View {
                     .disabled(clearHistory == nil || !historyItems.contains { $0.isLocalRecord })
             } label: { Text("管理本机记录").foregroundColor(DesignTokens.Text.secondary) }
                 .modifier(NativeMenuStyle()).disabled(loading)
-        }.padding(16)
+        }.padding(12)
     }
 
-    private var feedbackBody: some View {
-        VStack(alignment: .leading, spacing: 12) {
+    private func feedbackBody(draft: GitHubIssueDraft?) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("反馈内容").font(DesignTokens.Font.title3)
             VStack(alignment: .leading, spacing: 4) {
-                Text("反馈标题").font(DesignTokens.Font.small.weight(.medium))
+                Text("标题").font(DesignTokens.Font.small.weight(.medium)).foregroundColor(DesignTokens.Text.secondary)
                 TextField("概括发生的问题", text: $issueTitle).textFieldStyle(RoundedBorderTextFieldStyle())
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text("问题现象与复现步骤").font(DesignTokens.Font.small.weight(.medium))
+                    .foregroundColor(DesignTokens.Text.secondary)
                 ZStack(alignment: .topLeading) {
-                    TextEditor(text: $problem).font(DesignTokens.Font.body).frame(height: 70)
+                    TextEditor(text: $problem).font(DesignTokens.Font.body).frame(height: 68)
                     if problem.isEmpty {
                         Text("例如：已安装驱动，但 H.264 硬编失败；点击开始后出现……")
                             .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.placeholder)
                             .padding(.horizontal, 5).padding(.vertical, 6).allowsHitTesting(false)
                     }
-                }.overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.sep, lineWidth: hairline))
+                }.overlay(RoundedRectangle(cornerRadius: DesignTokens.controlCorner)
+                    .strokeBorder(DesignTokens.Stroke.separator, lineWidth: hairline))
             }
+            selectedDiagnosticSummary(draft: draft)
             HStack(spacing: 8) {
                 Picker("预览内容", selection: $previewTab) {
-                    ForEach(PreviewTab.allCases) { tab in Text(tab.rawValue).tag(tab) }
+                    ForEach(PreviewTab.allCases) { tab in
+                        Text(tab == .full && usingEditedCopy ? "删减日志" : tab.rawValue)
+                            .tag(tab).disabled(usingEditedCopy && tab == .json)
+                    }
                 }.pickerStyle(SegmentedPickerStyle()).labelsHidden()
-                Text(ByteCountFormatter.string(fromByteCount: Int64(previewText.utf8.count), countStyle: .file))
+                Spacer(minLength: 4)
+                Text(previewSizeLabel(draft: draft))
+                    .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.85)
+            }
+            FeedbackTextPreview(text: previewText(for: draft))
+                .frame(minHeight: 190, maxHeight: 320)
+                .overlay(RoundedRectangle(cornerRadius: DesignTokens.corner)
+                    .strokeBorder(DesignTokens.Stroke.separator, lineWidth: hairline))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func selectedDiagnosticSummary(draft: GitHubIssueDraft?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("本次诊断").font(DesignTokens.Font.small.weight(.medium))
+                    .foregroundColor(DesignTokens.Text.secondary)
+                Text(selected?.title ?? "未选择诊断记录")
+                    .font(DesignTokens.Font.body.weight(.medium)).lineLimit(1)
+                Spacer(minLength: 8)
+                if usingEditedCopy {
+                    Text("删减副本 · 仅 TXT").font(DesignTokens.Font.small)
+                        .foregroundColor(DesignTokens.Text.secondary)
+                    Button("还原原日志") {
+                        if let id = originalSelection?.id { editedLogs.removeValue(forKey: id) }
+                        draftRevision += 1
+                        operationNotice = "已还原本机原日志；提交前请重新检查"
+                        scheduleDraftGeneration()
+                    }.font(DesignTokens.Font.small)
+                }
+            }
+            if let selected {
+                Text(Self.historyDetail(selected) + (selected.hasStructuredSummary
+                    ? " · 含机型、CPU、内存、GPU、系统、驱动与测试摘要"
+                    : " · " + (selected.summary.isEmpty ? "所选脱敏日志" : selected.summary)))
+                    .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary)
+                    .lineLimit(2).truncationMode(.tail)
+            } else {
+                Text("尚无诊断日志；当前网页草稿只会包含标题和问题说明。")
                     .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary)
             }
             HStack(spacing: 8) {
-                if usingEditedCopy {
-                    Text("删减副本 · 仅 TXT").font(DesignTokens.Font.small.weight(.medium))
-                        .foregroundColor(DesignTokens.Text.primary)
-                    Button("还原原日志") {
-                        if let id = originalSelection?.id { editedLogs.removeValue(forKey: id) }
-                        operationNotice = "已还原本机原日志；提交前请重新检查"
-                    }.font(DesignTokens.Font.small)
-                } else {
-                    Text("可先删减日志副本；原本机记录保持不变").font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary)
+                Text(loading ? "正在读取本机记录…" : (draft.map(deliveryDescription) ?? "正在更新预览…"))
+                    .font(DesignTokens.Font.small)
+                    .foregroundColor(DesignTokens.Text.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                if let draft, draft.delivery == .summaryOnly {
+                    Button(usingEditedCopy ? "导出删减副本…" : "导出完整日志…") { exportSelectedLog() }
+                        .font(DesignTokens.Font.small).disabled(selected == nil)
+                } else if let draft, draft.delivery == .manual {
+                    Button("复制完整反馈") { copyFullFeedback() }
+                        .font(DesignTokens.Font.small)
+                }
+            }
+            HStack(spacing: 8) {
+                if !usingEditedCopy {
+                    Text("原日志不变，可先删减本次反馈副本")
+                        .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.tertiary)
                 }
                 Spacer()
                 Button("删减日志副本…") {
@@ -259,48 +366,104 @@ struct FeedbackView: View {
                     logEditorPresented = true
                 }.font(DesignTokens.Font.small).disabled(selected == nil)
             }
-            FeedbackTextPreview(text: previewText)
-                .frame(minHeight: 220, maxHeight: .infinity)
-                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.sep, lineWidth: hairline))
-            Text(draft.notice)
-                .font(DesignTokens.Font.small)
-                .foregroundColor(draft.requiresManualAttachment ? DesignTokens.Text.primary : DesignTokens.Text.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("前往时会把网页草稿交给 GitHub，确认提交后公开。附件拖入网页时即会上传。")
-                .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: DesignTokens.corner).fill(DesignTokens.Surface.content))
+        .overlay(RoundedRectangle(cornerRadius: DesignTokens.corner)
+            .strokeBorder(DesignTokens.Stroke.separator, lineWidth: hairline))
+    }
+
+    private func deliveryDescription(_ draft: GitHubIssueDraft) -> String {
+        switch draft.delivery {
+        case .complete:
+            if selected == nil { return "未选择诊断日志；网页草稿仅含标题与问题说明。" }
+            if usingEditedCopy { return "网页草稿包含当前删减后的脱敏内容；原日志与原 JSON 不变。" }
+            return "网页草稿包含问题、诊断摘要和所选脱敏日志。"
+        case .summaryOnly:
+            return usingEditedCopy
+                ? "网页链接只含问题与诊断摘要；删减后的日志副本未放入，需手动附加。"
+                : "网页链接只含问题与诊断摘要；完整过程日志未传，需手动附加。"
+        case .manual:
+            return "网页仅预填待补充说明；完整反馈尚未放入链接。"
         }
     }
 
-    private var footer: some View {
+    private func previewSizeLabel(draft: GitHubIssueDraft?) -> String {
+        switch previewTab {
+        case .draft:
+            guard let draft else { return "预览更新中" }
+            if let url = draft.url { return "网页链接 " + Self.byteCount(url.absoluteString.utf8.count) }
+            return "无法预填链接"
+        case .full:
+            return (usingEditedCopy ? "副本 " : "日志 ") + Self.byteCount(selected?.redactedText.utf8.count ?? 0)
+        case .json:
+            return "JSON " + Self.byteCount(selected?.redactedJSON?.utf8.count ?? 0)
+        }
+    }
+
+    private func footer(draft: GitHubIssueDraft?) -> some View {
         HStack(spacing: 8) {
-            Text(operationNotice.isEmpty ? "无后台传输 · 无需维护者 Token" : operationNotice)
-                .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.primary).lineLimit(2)
-            Spacer()
+            Text(operationNotice.isEmpty ? "无后台上传" : operationNotice)
+                .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary).lineLimit(2)
+            Spacer(minLength: 6)
             Menu {
-                Button("网页草稿 TXT（与网页预览一致）") { exportDraft(asJSON: false) }
-                Button("网页草稿 JSON（与网页预览一致）") { exportDraft(asJSON: true) }
-                    .disabled(usingEditedCopy)
+                Button("网页草稿 TXT") { exportDraft(asJSON: false) }.disabled(draft == nil || loading)
+                Button("网页草稿 JSON") { exportDraft(asJSON: true) }
+                    .disabled(draft == nil || loading || usingEditedCopy)
                 Divider()
-                Button("完整反馈 TXT（包含问题和完整日志）") {
-                    export(draft.fullText, extension: "txt", name: "NVCodecTest-feedback-full")
-                }
-                Button("完整脱敏日志 TXT（手动附件）") {
-                    if let selected = selected { export(selected.redactedText, extension: "txt", name: "NVCodecTest-log-redacted") }
-                }.disabled(selected == nil)
-                Button("完整脱敏诊断 JSON（手动附件）") {
-                    if let json = selected?.redactedJSON { export(json, extension: "json", name: "NVCodecTest-diagnostic-redacted") }
-                }.disabled(selected?.redactedJSON == nil)
+                Button("完整反馈 TXT（含问题和完整日志）") { exportFullFeedback() }
+                    .disabled(draft == nil || loading)
+                Button(usingEditedCopy ? "删减后的日志副本 TXT" : "完整脱敏日志 TXT（手动附件）") { exportSelectedLog() }
+                    .disabled(selected == nil)
+                Button("完整脱敏诊断 JSON（手动附件）") { exportSelectedJSON() }
+                    .disabled(selected?.redactedJSON == nil)
             } label: { Text("导出…").foregroundColor(DesignTokens.Text.secondary) }
                 .modifier(NativeMenuStyle())
             Menu {
-                Button("复制网页草稿正文") { copy(draft.body, notice: "已复制网页草稿正文，与网页预览一致") }
-                Button("复制完整反馈正文") { copy(draft.fullBody, notice: "已复制完整反馈；可在 GitHub 网页手动粘贴") }
+                Button("复制网页草稿正文") { copyDraftBody() }.disabled(draft == nil || loading)
+                Button("复制完整反馈正文") { copyFullFeedback() }.disabled(draft == nil || loading)
             } label: { Text("复制反馈").foregroundColor(DesignTokens.Text.secondary) }
                 .modifier(NativeMenuStyle())
             Button(previewTab == .draft ? "前往 GitHub 确认…" : "查看网页草稿", action: openGitHub)
                 .buttonStyle(NativeButtonStyle(prominent: true))
-        }.padding(.horizontal, 20).padding(.vertical, 14)
+                .disabled(draft == nil || loading)
+        }.padding(.horizontal, 16).padding(.vertical, 10)
+    }
+
+    private func scheduleDraftGeneration() {
+        let key = activeDraftKey
+        if cachedDraft?.key == key || (draftPending && pendingDraftKey == key) { return }
+
+        draftGeneration &+= 1
+        let generation = draftGeneration
+        draftWorkItem?.cancel()
+        cachedDraft = nil
+        pendingDraftKey = key
+        draftPending = true
+
+        let title = key.title
+        let problem = key.problem
+        let diagnostic = selected
+        let workItem = DispatchWorkItem {
+            let value = GitHubFeedback.makeDraft(title: title, problem: problem, diagnostic: diagnostic)
+            DispatchQueue.main.async {
+                guard generation == draftGeneration, key == activeDraftKey else { return }
+                cachedDraft = CachedDraft(key: key, value: value)
+                pendingDraftKey = nil
+                draftPending = false
+                draftWorkItem = nil
+            }
+        }
+        draftWorkItem = workItem
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.12, execute: workItem)
+    }
+
+    private func cancelDraftGeneration() {
+        draftGeneration &+= 1
+        draftWorkItem?.cancel()
+        draftWorkItem = nil
+        pendingDraftKey = nil
+        draftPending = false
     }
 
     private func reloadHistory(firstLoad: Bool = false) {
@@ -313,11 +476,18 @@ struct FeedbackView: View {
                 switch result {
                 case .success(let items):
                     historyItems = items
-                    if (!hasLoadedHistory || firstLoad), let latest = items.first { selectedID = latest.id }
-                    else if !diagnostics.contains(where: { $0.id == selectedID }) { selectedID = diagnostics.first?.id ?? "" }
+                    draftRevision += 1
+                    if (!hasLoadedHistory || firstLoad) {
+                        selectedID = items.first?.id ?? currentDiagnostic?.id
+                    } else if !diagnostics.contains(where: { $0.id == selectedID }) {
+                        selectedID = diagnostics.first?.id
+                    }
                     hasLoadedHistory = true
+                    scheduleDraftGeneration()
                 case .failure(let error):
+                    hasLoadedHistory = true
                     activeAlert = .error("无法读取日志：" + DiagnosticRedactor.redact(error.localizedDescription))
+                    scheduleDraftGeneration()
                 }
             }
         }
@@ -361,11 +531,38 @@ struct FeedbackView: View {
         else { activeAlert = .error("无法写入剪贴板，请重试。") }
     }
 
+    private func copyDraftBody() {
+        guard let draft = readyDraft, !loading else { return }
+        copy(draft.body, notice: "已复制当前网页草稿正文")
+    }
+
+    private func copyFullFeedback() {
+        guard let draft = readyDraft, !loading else { return }
+        copy(draft.fullBody, notice: "已复制完整反馈；可在 GitHub 网页手动粘贴")
+    }
+
     private func exportDraft(asJSON: Bool) {
+        guard let draft = readyDraft, !loading else { return }
         do {
             let text = try asJSON ? GitHubFeedback.draftJSON(draft) : draft.text
-            export(text, extension: asJSON ? "json" : "txt", name: "NVCodecTest-GitHub-draft")
+            export(text, extension: asJSON ? "json" : "txt", name: "GPU-Z-GitHub-draft")
         } catch { activeAlert = .error(DiagnosticRedactor.redact(error.localizedDescription)) }
+    }
+
+    private func exportFullFeedback() {
+        guard let draft = readyDraft, !loading else { return }
+        export(draft.fullText, extension: "txt", name: "GPU-Z-feedback-full")
+    }
+
+    private func exportSelectedLog() {
+        guard let selected else { return }
+        export(selected.redactedText, extension: "txt",
+               name: usingEditedCopy ? "GPU-Z-log-redacted-copy" : "GPU-Z-log-redacted")
+    }
+
+    private func exportSelectedJSON() {
+        guard let json = selected?.redactedJSON else { return }
+        export(json, extension: "json", name: "GPU-Z-diagnostic-redacted")
     }
 
     private func export(_ text: String, extension fileExtension: String, name: String) {
@@ -384,7 +581,8 @@ struct FeedbackView: View {
     }
 
     private func openGitHub() {
-        // 即将传给浏览器的内容始终先显示在“网页草稿”标签中；不会调用 GitHub API。
+        guard let draft = readyDraft, !loading else { return }
+        // The preview must match the exact draft handed to the browser; this never submits an issue.
         guard previewTab == .draft else {
             previewTab = .draft
             operationNotice = "已切换到将打开的网页草稿；检查后再点击“前往 GitHub 确认”"
@@ -398,14 +596,39 @@ struct FeedbackView: View {
         } else { activeAlert = .error("无法打开默认浏览器。可复制反馈后手动前往 github.com/GeekAudio/NVCodecTest/issues/new。") }
     }
 
+    private static func historyDetail(_ diagnostic: FeedbackDiagnostic) -> String {
+        let local = diagnostic.isLocalRecord ? "本机" : "当前快照"
+        return Self.dateString(diagnostic.createdAt) + " · " + local
+    }
+
+    private static func byteCount(_ count: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(count), countStyle: .file)
+    }
+
     private static func dateString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "MM-dd HH:mm:ss"
         return formatter.string(from: date)
     }
+
+    private static func shortTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
+    }
 }
 
+private struct FeedbackListSurface: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(macOS 13, *) {
+            content.scrollContentBackground(.hidden)
+        } else {
+            content
+        }
+    }
+}
 /// macOS 11 也支持选择和复制的只读预览，不依赖后续系统的 Text.textSelection。
 private struct FeedbackTextPreview: NSViewRepresentable {
     let text: String

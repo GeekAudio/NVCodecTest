@@ -76,7 +76,7 @@ enum SelfTest {
 
     static func renderText(env: [EnvRow], encoders: [EncoderRow], results: [BenchRow],
                            driverReport: DriverReport? = nil, environmentDate: Date? = nil, wasCancelled: Bool = false) -> String {
-        var lines = ["NVIDIA 编解码诊断 · v\(version)", "导出时间：\(stampHuman())",
+        var lines = ["GPU-Z · NVIDIA 编解码诊断 · v\(version)", "导出时间：\(stampHuman())",
                      "状态：\(runState(results, wasCancelled: wasCancelled))", "目标：黑苹果 NVIDIA / NullMoth 硬件编解码能力"]
         if let date = environmentDate { lines.append("环境采集时间：\(stampHuman(date))") }
         lines += ["", "【NVIDIA 结论】", "编码：" + verdict(group: "编码", rows: results),
@@ -184,7 +184,7 @@ enum SelfTest {
     }
 
     static func run(diagnosticsOnly: Bool = false) {
-        print("NVIDIA 编解码诊断 · \(diagnosticsOnly ? "环境诊断" : "完整测试")")
+        print("GPU-Z · NVIDIA 编解码诊断 · \(diagnosticsOnly ? "环境诊断" : "完整测试")")
         var log: RunLogRecorder?
         do {
             let store = try DiagnosticLogStore()

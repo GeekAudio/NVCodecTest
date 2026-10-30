@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 670),
                            styleMask: [.titled, .closable, .miniaturizable, .resizable],
                            backing: .buffered, defer: false)
-        win.title = "GPU Test"
+        win.title = "GPU-Z"
         win.titlebarAppearsTransparent = false
         win.titleVisibility = .visible
         win.toolbarStyle = .unified
@@ -55,7 +55,7 @@ if CommandLine.arguments.contains("--codec-worker") {
 
 if CommandLine.arguments.contains("--help") {
     print("""
-    NVIDIA 编解码诊断
+    GPU-Z — 视频编解码诊断
       --diagnose                   仅采集驱动与环境证据
       --selftest                   运行完整九项矩阵；Ctrl-C 请求安全取消
       --output <path.txt|path.json> 保存报告（默认 /tmp/nvcodec-selftest.txt）
@@ -98,10 +98,10 @@ app.setActivationPolicy(.regular)
 
 // 简单菜单：⌘Q 退出
 let mainMenu = NSMenu()
-let appItem = NSMenuItem()
+let appItem = NSMenuItem(title: "GPU-Z", action: nil, keyEquivalent: "")
 mainMenu.addItem(appItem)
 let appSub = NSMenu()
-appSub.addItem(NSMenuItem(title: "关于 NVIDIA 编解码诊断",
+appSub.addItem(NSMenuItem(title: "关于 GPU-Z",
                           action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
                           keyEquivalent: ""))
 appSub.addItem(NSMenuItem.separator())

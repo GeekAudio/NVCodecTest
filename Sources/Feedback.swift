@@ -160,7 +160,17 @@ enum CompactDiagnosticSummary {
 }
 
 struct GitHubIssueDraft {
+    enum Delivery: Equatable {
+        /// The URL carries the complete content that was prepared for this report.
+        case complete
+        /// The URL carries the problem and compact diagnostic summary; full logs need manual attachment.
+        case summaryOnly
+        /// The URL carries a placeholder; the user must add or paste the full content manually.
+        case manual
+    }
+
     /// title/body 是确切写入 URL 的字段；fullBody 保留完整问题和日志，供手动复制或附件导出。
+    let delivery: Delivery
     let title: String
     let body: String
     let fullBody: String
@@ -185,7 +195,7 @@ enum GitHubFeedback {
     static func makeDraft(title: String, problem: String, diagnostic: FeedbackDiagnostic?,
                           maxURLBytes: Int = defaultMaximumURLBytes) -> GitHubIssueDraft {
         let cleanTitle = DiagnosticRedactor.redact(title).trimmingCharacters(in: .whitespacesAndNewlines)
-        let requestedTitle = cleanTitle.isEmpty ? "NVCodecTest 问题反馈" : cleanTitle
+        let requestedTitle = cleanTitle.isEmpty ? "GPU-Z 问题反馈" : cleanTitle
         let cleanProblem = DiagnosticRedactor.redact(problem).trimmingCharacters(in: .whitespacesAndNewlines)
         let problemText = cleanProblem.isEmpty ? "请补充问题现象、复现步骤，以及期望结果。" : cleanProblem
         // FeedbackDiagnostic 的唯一初始化器已脱敏，且字段不可变。
@@ -200,7 +210,7 @@ enum GitHubFeedback {
         let log = diagnostic?.redactedText ?? ""
         let fullBody = intro + (log.isEmpty ? "" : "\n\n## 完整脱敏日志\n" + fenced(log))
         if let url = issueURL(title: requestedTitle, body: fullBody, maxBytes: maxURLBytes) {
-            return GitHubIssueDraft(title: requestedTitle, body: fullBody, fullBody: fullBody, url: url,
+            return GitHubIssueDraft(delivery: .complete, title: requestedTitle, body: fullBody, fullBody: fullBody, url: url,
                 requiresManualAttachment: false,
                 notice: "将打开预填好的 GitHub 草稿；你仍需在网页检查并点击提交。文件不会自动附加。",
                 urlByteCount: url.absoluteString.utf8.count)
@@ -211,18 +221,18 @@ enum GitHubFeedback {
         let attachmentNote = "## 完整过程日志待手动附加\n已含\(summaryDescription)；完整过程日志未包含，尚未上传或自动附加。请导出完整脱敏 TXT/JSON，在 GitHub 网页手动添加；也可复制完整反馈正文粘贴。"
         let summaryBody = intro + "\n\n" + attachmentNote
         if let url = issueURL(title: requestedTitle, body: summaryBody, maxBytes: maxURLBytes) {
-            return GitHubIssueDraft(title: requestedTitle, body: summaryBody, fullBody: fullBody, url: url,
+            return GitHubIssueDraft(delivery: .summaryOnly, title: requestedTitle, body: summaryBody, fullBody: fullBody, url: url,
                 requiresManualAttachment: true,
                 notice: "已默认加入当前可见的\(summaryDescription)。完整过程日志超过 URL 兼容阈值，需导出后手动附加。",
                 urlByteCount: url.absoluteString.utf8.count)
         }
 
         // 问题或标题本身也可能过长：明确改用待补充说明，原文全部保留在完整反馈中。
-        let minimalTitle = "NVCodecTest 问题反馈（待补充完整内容）"
-        let minimalBody = "## 待补充完整反馈\n问题说明、标题或诊断摘要过长，未通过 URL 传递。请从 NVCodecTest 复制完整反馈正文并粘贴到这里；完整脱敏日志也可导出为 TXT/JSON 后手动添加。\n\n此处尚无完整日志或附件，打开网页不表示提交成功。"
+        let minimalTitle = "GPU-Z 问题反馈（待补充完整内容）"
+        let minimalBody = "## 待补充完整反馈\n问题说明、标题或诊断摘要过长，未通过 URL 传递。请从 GPU-Z 复制完整反馈正文并粘贴到这里；完整脱敏日志也可导出为 TXT/JSON 后手动添加。\n\n此处尚无完整日志或附件，打开网页不表示提交成功。"
         let preservedBody = "原拟标题：\(requestedTitle)\n\n" + fullBody
         let minimalURL = issueURL(title: minimalTitle, body: minimalBody, maxBytes: maxURLBytes)
-        return GitHubIssueDraft(title: minimalTitle, body: minimalBody, fullBody: preservedBody, url: minimalURL,
+        return GitHubIssueDraft(delivery: .manual, title: minimalTitle, body: minimalBody, fullBody: preservedBody, url: minimalURL,
             requiresManualAttachment: true,
             notice: minimalURL == nil
                 ? "兼容阈值不足以容纳最短草稿，无法自动预填。可复制完整反馈后手动前往目标仓库新建 issue。"

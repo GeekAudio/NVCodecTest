@@ -48,7 +48,7 @@ struct MainView: View {
     private var header: some View {
         HStack(spacing: 12) {
             Image(systemName: "play.rectangle").font(DesignTokens.Font.title2).foregroundColor(.codecAccent)
-            Text("GPU Test").font(DesignTokens.Font.title2)
+            Text("GPU-Z").font(DesignTokens.Font.title2)
             Text("视频编解码诊断").font(DesignTokens.Font.small).foregroundColor(.sub)
             Spacer(minLength: 12)
             Button(action: model.refresh) { Label("刷新环境", systemImage: "arrow.clockwise") }

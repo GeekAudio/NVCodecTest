@@ -106,7 +106,7 @@ enum Snapshot {
         host.wantsLayer = true
         let window = NSWindow(contentRect: host.frame,
             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "GPU Test"
+        window.title = "GPU-Z"
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = false
         window.toolbarStyle = .unified
@@ -157,7 +157,7 @@ enum Snapshot {
         host.displayIfNeeded()
 
         if livePreview {
-            window.title = "GPU Test · 报告预览"
+            window.title = "GPU-Z · 报告预览"
             let delegate = SnapshotPreviewDelegate(model: model)
             app.delegate = delegate
             let menu = NSMenu()

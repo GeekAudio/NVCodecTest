@@ -1,7 +1,13 @@
 import AppKit
 import CoreGraphics
 
-// 生成 AppIcon.icns：深蓝紫渐变圆角方块 + 白色播放符号 + 绿色硬件点
+// 恢复最初的播放符号与硬件圆点造型；仅改用石墨灰、浅灰与灰绿配色。
+// 图标是固定资源，统一按 Aqua 解析语义色；App 内的动态语义色不受影响。
+enum IconPalette {
+    static let background = NSColor.systemGray.blended(withFraction: 0.35, of: .labelColor)!.withAlphaComponent(1)
+    static let symbol = NSColor.controlBackgroundColor
+    static let indicator = NSColor.systemGreen.blended(withFraction: 0.55, of: .systemGray)!
+}
 let sizes = [16, 32, 64, 128, 256, 512, 1024]
 let outDir = "Resources/AppIcon.iconset"
 try? FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
@@ -18,18 +24,9 @@ func drawIcon(_ px: Int) -> Data? {
     let radius = rect.width * 0.225
     let path = CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
 
-    ctx.saveGState()
     ctx.addPath(path)
-    ctx.clip()
-    let colors = [
-        CGColor(red: 0.16, green: 0.20, blue: 0.42, alpha: 1.0),
-        CGColor(red: 0.32, green: 0.18, blue: 0.52, alpha: 1.0),
-    ] as CFArray
-    if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
-        ctx.drawLinearGradient(grad, start: CGPoint(x: 0, y: rect.maxY),
-                               end: CGPoint(x: rect.maxX, y: rect.minY), options: [])
-    }
-    ctx.restoreGState()
+    ctx.setFillColor(IconPalette.background.cgColor)
+    ctx.fillPath()
 
     // 播放三角（圆角，用同色描边磨圆尖角）
     let cx = s * 0.5, cy = s * 0.5
@@ -41,8 +38,8 @@ func drawIcon(_ px: Int) -> Data? {
     tri.closeSubpath()
 
     let triRadius = s * 0.035
-    ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-    ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+    ctx.setStrokeColor(IconPalette.symbol.cgColor)
+    ctx.setFillColor(IconPalette.symbol.cgColor)
     ctx.setLineWidth(triRadius * 2)
     ctx.setLineJoin(.round)
     ctx.addPath(tri)
@@ -50,12 +47,12 @@ func drawIcon(_ px: Int) -> Data? {
     ctx.addPath(tri)
     ctx.fillPath()
 
-    // 右上角绿色硬件指示点
+    // 右上角灰绿色硬件指示点，位置与尺寸保持原样。
     let dotR = s * 0.085
     let dotC = CGPoint(x: s * 0.775, y: s * 0.775)
-    ctx.setFillColor(CGColor(red: 0.20, green: 0.85, blue: 0.45, alpha: 1))
+    ctx.setFillColor(IconPalette.indicator.cgColor)
     ctx.fillEllipse(in: CGRect(x: dotC.x - dotR, y: dotC.y - dotR, width: dotR * 2, height: dotR * 2))
-    ctx.setStrokeColor(CGColor(red: 0.16, green: 0.20, blue: 0.42, alpha: 0.85))
+    ctx.setStrokeColor(IconPalette.background.withAlphaComponent(0.85).cgColor)
     ctx.setLineWidth(s * 0.012)
     ctx.strokeEllipse(in: CGRect(x: dotC.x - dotR, y: dotC.y - dotR, width: dotR * 2, height: dotR * 2))
 
@@ -64,15 +61,17 @@ func drawIcon(_ px: Int) -> Data? {
     return rep.representation(using: .png, properties: [:])
 }
 
-for sz in sizes {
-    if let d = drawIcon(sz) {
-        let name = sz <= 512 ? "icon_\(sz)x\(sz).png" : "icon_512x512@2x.png"
-        try? d.write(to: URL(fileURLWithPath: "\(outDir)/\(name)"))
-        if sz == 1024 { try? d.write(to: URL(fileURLWithPath: "Resources/icon-1024.png")) }
-    }
-    // Retina 变体
-    if sz <= 512, sz >= 16, let d2 = drawIcon(sz * 2) {
-        try? d2.write(to: URL(fileURLWithPath: "\(outDir)/icon_\(sz)x\(sz)@2x.png"))
+NSAppearance(named: .aqua)!.performAsCurrentDrawingAppearance {
+    for sz in sizes {
+        if let d = drawIcon(sz) {
+            let name = sz <= 512 ? "icon_\(sz)x\(sz).png" : "icon_512x512@2x.png"
+            try? d.write(to: URL(fileURLWithPath: "\(outDir)/\(name)"))
+            if sz == 1024 { try? d.write(to: URL(fileURLWithPath: "Resources/icon-1024.png")) }
+        }
+        // Retina 变体
+        if sz <= 512, sz >= 16, let d2 = drawIcon(sz * 2) {
+            try? d2.write(to: URL(fileURLWithPath: "\(outDir)/icon_\(sz)x\(sz)@2x.png"))
+        }
     }
 }
 print("iconset 生成完毕")

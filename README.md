@@ -1,14 +1,16 @@
-# NVCodecTest
+# GPU-Z
 
-给黑苹果 NVIDIA 显卡测一测 H.264 / HEVC 硬编、硬解，也能看看 NullMoth 驱动有没有正常加载。
+给黑苹果 NVIDIA 显卡测一测 H.264 / HEVC 硬编、硬解，也能看看 NullMoth 驱动有没有正常加载。源码仓库仍叫 NVCodecTest。
 
 **[下载与版本说明](https://github.com/GeekAudio/NVCodecTest/releases)**
 
-v1.4.3 使用 macOS 原生语义色和材质，外观、强调色跟随系统。主窗口不滚动、不分页，九项测试、环境摘要、进度和全部操作直接可见；完整证据、测量方法、日志与反馈使用弹窗。
+v1.5.0 是本地开发版，尚未发布。应用显示名称改为 GPU-Z，并调整了日志与反馈页面；下载入口仍指向原有 NVCodecTest Releases。
 
-这一版保留原页面布局和本机环境栏，把普通按钮的底色与文字调浅，主按钮文案收紧为“开始测试”，强调色跟随系统。下方截图为 v1.4.2，页面结构相同。
+应用继续使用原 bundle identifier 和 `~/Library/Application Support/NVCodecTest/Diagnostics` 日志目录，因此升级后仍能查看既有本机记录。主窗口保留九项测试卡片与本机环境栏；完整证据、测量方法、日志与反馈使用弹窗。
 
 ![界面](docs/screenshot.png)
+
+主界面图重放历史报告，反馈页图使用固定示例；没有为截图重跑显卡负载。
 
 ## 怎么用
 
@@ -41,7 +43,7 @@ v1.4.3 使用 macOS 原生语义色和材质，外观、强调色跟随系统。
 需要 macOS 11 或更新版本，以及 Xcode Command Line Tools。在仓库目录运行：
 
 ```bash
-./build.sh       # 生成 build/NVCodecTest.app
+./build.sh       # 生成 build/GPU-Z.app（可执行文件仍为 NVCodecTest）
 ./package.sh     # 生成 DMG
 
 ./Tests/run-env-probe-tests.sh
@@ -57,8 +59,8 @@ App 包含 Intel 和 Apple Silicon 两种架构。NVIDIA / NullMoth 检测主要
 命令行也能用：
 
 ```bash
-./build/NVCodecTest.app/Contents/MacOS/NVCodecTest --diagnose --output /tmp/nvcodec-env.json
-./build/NVCodecTest.app/Contents/MacOS/NVCodecTest --selftest --output /tmp/nvcodec-test.txt --json-output /tmp/nvcodec-test.json
+./build/GPU-Z.app/Contents/MacOS/NVCodecTest --diagnose --output /tmp/nvcodec-env.json
+./build/GPU-Z.app/Contents/MacOS/NVCodecTest --selftest --output /tmp/nvcodec-test.txt --json-output /tmp/nvcodec-test.json
 ```
 
 也可以用 `--preview --results-json <已有报告>` 打开真实窗口查看已保存结果，不重新运行 GPU 测试。

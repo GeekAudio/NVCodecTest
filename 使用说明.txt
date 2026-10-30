@@ -1,5 +1,5 @@
-GPU Test — NVCodecTest 视频编解码诊断 v1.4.3
-==========================================
+GPU-Z — 视频编解码诊断 v1.5.0（本地开发版，尚未发布）
+=====================================================
 
 用于检查 NullMoth 驱动和 NVIDIA 显卡的 H.264 / HEVC 硬件编解码能力。
 采用 Apple 官方 API；本程序是诊断工具，不是官方认证跑分。
@@ -7,10 +7,11 @@ GPU Test — NVCodecTest 视频编解码诊断 v1.4.3
 
 安装
 ----
-1. 打开 DMG，把 NVCodecTest.app 拖到“应用程序”。
+1. 打开 DMG，把 GPU-Z.app 拖到“应用程序”。
 2. 首次双击若被系统拦截，点“完成”关闭提示。
 3. 打开“系统设置 › 隐私与安全性 › 安全性”，点“仍要打开”。
 4. 输入登录密码，再点“打开”。以后直接双击即可。
+5. 从旧版升级时，确认 GPU-Z 能正常打开后，可删除“应用程序”里的旧 NVCodecTest.app；本机诊断记录会保留。
 
 使用
 ----
@@ -23,7 +24,7 @@ NVIDIA 证据结论、进度和所有操作均直接可见。
 右侧“完整环境与编码器…”打开详细安装、加载、版本和注册证据。
 底部“测量方法”和“日志与反馈”分别打开详情弹窗；详情内容允许滚动。
 Command-Return 开始测试，Command-. 请求安全取消。
-v1.4.3 保留原有页面布局，普通按钮底色与文字调浅，按钮底板和交互状态仍由 macOS 绘制；主按钮强调色跟随系统。“开始测试”运行完整九项矩阵。
+v1.5.0 将应用显示名称改为 GPU-Z，并调整日志与反馈页面；主窗口继续使用原有九项测试和环境摘要布局。“开始测试”运行完整九项矩阵。此版本尚未发布，下载入口仍在原 NVCodecTest 仓库。
 
 每项结果的“证据与详情”会显示硬件属性、编码器身份、GPU 证据、
 完整帧数、重复范围和错误。可以复制详情，也可导出 TXT / JSON。
@@ -86,19 +87,19 @@ NVIDIA 已证实：完整输出、硬件属性及 NVIDIA 身份证据共同成�
 命令行
 ------
 环境诊断：
-/Applications/NVCodecTest.app/Contents/MacOS/NVCodecTest --diagnose --output /tmp/nvcodec-env.json
+/Applications/GPU-Z.app/Contents/MacOS/NVCodecTest --diagnose --output /tmp/nvcodec-env.json
 
 完整测试（Ctrl-C 请求安全取消）：
-/Applications/NVCodecTest.app/Contents/MacOS/NVCodecTest --selftest --output /tmp/nvcodec-test.txt --json-output /tmp/nvcodec-test.json
+/Applications/GPU-Z.app/Contents/MacOS/NVCodecTest --selftest --output /tmp/nvcodec-test.txt --json-output /tmp/nvcodec-test.json
 
 真实窗口重放已有报告（不重新测 GPU）：
-/Applications/NVCodecTest.app/Contents/MacOS/NVCodecTest --preview --results-json /tmp/nvcodec-test.json
+/Applications/GPU-Z.app/Contents/MacOS/NVCodecTest --preview --results-json /tmp/nvcodec-test.json
 
 权限与卸载
 ----------
 无需 root，不改 EFI 或系统配置，不安装驱动或后台服务。
 会创建临时探测输出、用户导出的报告和本机脱敏诊断日志。
-日志位置：~/Library/Application Support/NVCodecTest/Diagnostics
+日志位置：~/Library/Application Support/NVCodecTest/Diagnostics。应用保留原 bundle identifier 和日志目录，方便 GPU-Z 继续读取升级前保存的诊断记录。
 卸载时可先在“日志与反馈”清空记录，再把 App 拖到废纸篓。许可：MIT。
 
 检测依据
