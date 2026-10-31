@@ -21,9 +21,9 @@ struct ResultSemanticsTests {
             if !condition() { failures.append(name) }
         }
         func row(group: String = "编码", item: String = "H.264 1080p", mode: String = "强制硬件",
-                 status: BenchStatus = .passed, ok: Bool = true, hardware: Bool? = true,
+                 status: BenchStatus = .passed, ok: Bool = true, hardware: Bool? = true, fps: Double? = nil,
                  attribution: BenchAttribution = .unknown, nvidia: Bool = false) -> BenchRow {
-            BenchRow(group: group, item: item, mode: mode, ok: ok, fps: ok ? 240 : 0,
+            BenchRow(group: group, item: item, mode: mode, ok: ok, fps: fps ?? (ok ? 240 : 0),
                      engine: "fixture engine", detail: "固定测试证据", status: status,
                      hardwareAccelerated: hardware, attribution: attribution,
                      isNVIDIAConfirmed: nvidia)
@@ -45,6 +45,80 @@ struct ResultSemanticsTests {
         let notTested = row(status: .notTested, ok: false, hardware: nil)
         let cancelled = row(status: .cancelled, ok: false, hardware: nil)
 
+        // Dashboard/FPS callers share this nonserialized validity boundary.
+        check(row().hasValidMeasurement, "passed, successful and positive finite FPS is a valid measurement")
+        check(!row(fps: 0).hasValidMeasurement && !row(fps: -1).hasValidMeasurement,
+              "zero and negative FPS cannot become a displayed measurement")
+        check(!row(fps: .nan).hasValidMeasurement && !row(fps: .infinity).hasValidMeasurement
+              && !row(fps: -.infinity).hasValidMeasurement,
+              "nonfinite FPS cannot become a displayed measurement")
+        check(!row(status: .failed, fps: 240).hasValidMeasurement
+              && !row(status: .passed, ok: false, fps: 240).hasValidMeasurement,
+              "a valid numeric rate does not override the stored result state")
+        let invalidNVIDIAFlag = row(status: .passed, ok: true, hardware: true, fps: 0,
+                                    attribution: .nvidiaConfirmed, nvidia: true)
+        let automaticNVIDIA = row(item: "H.264 1080p · automatic", mode: "自动选择",
+                                  hardware: true, fps: 240,
+                                  attribution: .nvidiaConfirmed, nvidia: true)
+        let invalidAutomaticNVIDIA = row(item: "H.264 1080p · automatic invalid", mode: "自动选择",
+                                         hardware: true, fps: 0,
+                                         attribution: .nvidiaConfirmed, nvidia: true)
+        let contradictoryPass = row(item: "H.264 1080p · contradictory", status: .passed,
+                                    ok: false, hardware: true, fps: 240,
+                                    attribution: .nvidiaConfirmed, nvidia: true)
+        let contradictoryFailure = row(status: .failed, ok: true, hardware: true, fps: 240,
+                                       attribution: .nvidiaConfirmed, nvidia: true)
+        check(!invalidNVIDIAFlag.hasValidMeasurement && !contradictoryPass.hasValidMeasurement
+              && !contradictoryFailure.hasValidMeasurement,
+              "zero FPS, passed with ok=false, and failed with ok=true are all invalid")
+        check(SelfTest.statusLabel(invalidNVIDIAFlag) == "待验证"
+              && SelfTest.statusLabel(contradictoryPass) == "待验证",
+              "a passed status cannot be reported as a pass without valid FPS and ok=true")
+        check(SelfTest.verdict(group: "编码", rows: [invalidNVIDIAFlag]).contains("待验证")
+              && !SelfTest.verdict(group: "编码", rows: [invalidNVIDIAFlag]).contains("已确认 NVIDIA 路径"),
+              "an invalid row cannot confirm NVIDIA even when its raw confirmation flag is true")
+        let automaticText = SelfTest.renderText(env: [], encoders: [], results: [automaticNVIDIA])
+        check(automaticText.contains("H.264 1080p · automatic · 自动选择 · 通过")
+              && automaticText.contains("NVIDIA 归属：已确认"),
+              "a valid automatic hardware result preserves its row-level NVIDIA confirmation")
+        check(SelfTest.verdict(group: "编码", rows: [automaticNVIDIA]) == "未测试",
+              "automatic mode does not change the forced-hardware aggregate verdict")
+        let invalidAutomaticText = SelfTest.renderText(env: [], encoders: [], results: [invalidAutomaticNVIDIA])
+        check(invalidAutomaticText.contains("H.264 1080p · automatic invalid · 自动选择 · 待验证")
+              && !invalidAutomaticText.contains("NVIDIA 归属：已确认"),
+              "an invalid automatic result stays pending despite its raw NVIDIA flag")
+        let invalidAutomaticSoftware = row(item: "H.264 1080p · automatic invalid", mode: "软件编码",
+                                           hardware: false, fps: 120, attribution: .software)
+        let invalidAutomaticRatioText = SelfTest.renderText(env: [], encoders: [],
+            results: [invalidAutomaticNVIDIA, invalidAutomaticSoftware])
+        check(!invalidAutomaticRatioText.contains("硬件 / 软件 ="),
+              "an invalid automatic hardware result cannot produce a software ratio")
+
+        let ratioHardware = row(item: "HEVC 1080p", hardware: true, fps: 480)
+        let ratioSoftware = row(item: "HEVC 1080p", mode: "软件编码", hardware: false,
+                                fps: 120, attribution: .software)
+        check(ratioHardware.throughputRatio(comparedTo: ratioSoftware) == 4,
+              "a valid matching hardware and software pair reports its finite ratio")
+        let validRatioText = SelfTest.renderText(env: [], encoders: [], results: [ratioHardware, ratioSoftware])
+        check(validRatioText.contains("硬件 / 软件 = 4.00×"),
+              "text report includes the shared ratio for a valid matching pair")
+        let automaticRatioHardware = row(item: "Auto HEVC 1080p", mode: "自动选择",
+                                         hardware: true, fps: 240)
+        let automaticRatioSoftware = row(item: "Auto HEVC 1080p", mode: "软件编码", hardware: false,
+                                         fps: 120, attribution: .software)
+        let automaticRatioText = SelfTest.renderText(env: [], encoders: [],
+            results: [automaticRatioHardware, automaticRatioSoftware])
+        check(automaticRatioText.contains("编码 Auto HEVC 1080p：硬件 / 软件 = 2.00×"),
+              "text report uses the shared ratio for a valid automatic hardware result")
+        let overflowHardware = row(item: "HEVC 4K", hardware: true, fps: .greatestFiniteMagnitude)
+        let tinySoftware = row(item: "HEVC 4K", mode: "软件编码", hardware: false,
+                               fps: .leastNonzeroMagnitude, attribution: .software)
+        check(overflowHardware.throughputRatio(comparedTo: tinySoftware) == nil,
+              "an overflowing FPS ratio is omitted")
+        let encodedValidity = try JSONEncoder().encode(row())
+        check(!String(decoding: encodedValidity, as: UTF8.self).contains("hasValidMeasurement"),
+              "validity remains derived and adds no Codable field")
+
         check(SelfTest.verdict(group: "编码", rows: [nvidiaEncode]).hasPrefix("已确认 NVIDIA 路径"),
               "confirmed successful NVIDIA encode is recognized")
         check(SelfTest.verdict(group: "解码", rows: [nvidiaDecode]).hasPrefix("已确认 NVIDIA 路径"),
@@ -62,12 +136,37 @@ struct ResultSemanticsTests {
               "encode success cannot become a decode verdict")
         check(SelfTest.verdict(group: "编码", rows: [software]) == "未测试",
               "software reference cannot become a hardware test result")
+        let invalidText = SelfTest.renderText(env: [], encoders: [],
+            results: [invalidNVIDIAFlag, contradictoryPass])
+        check(invalidText.contains("编码：结果待验证")
+              && invalidText.contains("H.264 1080p · 强制硬件 · 待验证"),
+              "text export labels inconsistent passed rows as pending verification")
+        check(invalidText.contains("原始字段：status=成功 · ok=true · fps=0.0 · NVIDIA标记=true")
+              && invalidText.contains("原始字段：status=成功 · ok=false · fps=240.0 · NVIDIA标记=true"),
+              "text export preserves raw status, ok, FPS, and NVIDIA flag values")
+        check(!invalidText.contains("  吞吐：") && !invalidText.contains("NVIDIA 归属：已确认")
+              && !invalidText.contains("硬件 / 软件 ="),
+              "invalid rows emit no throughput, NVIDIA confirmation, or software ratio")
+        let invalidRatioText = SelfTest.renderText(env: [], encoders: [],
+            results: [invalidNVIDIAFlag, ratioSoftware])
+        check(!invalidRatioText.contains("硬件 / 软件 ="),
+              "a valid software baseline cannot produce a ratio for an invalid hardware result")
         let legacyNamedNVIDIA = BenchRow(group: "编码", item: "HEVC 1080p", mode: "强制硬件",
             ok: true, fps: 300, engine: "NVIDIA NVENC", detail: "只有名称，没有归属证据")
         check(!legacyNamedNVIDIA.isNVIDIAConfirmed && legacyNamedNVIDIA.attribution == .unknown,
               "legacy initializer never invents NVIDIA confirmation")
         check(!SelfTest.verdict(group: "编码", rows: [legacyNamedNVIDIA]).hasPrefix("已确认 NVIDIA 路径"),
               "NVIDIA text alone is not confirmation")
+
+        let invalidJSON = try SelfTest.renderJSON(env: [], encoders: [], results: [invalidNVIDIAFlag, contradictoryPass])
+        let invalidReport = try reportJSON(invalidJSON)
+        check(invalidReport.schemaVersion == 1 && invalidReport.results[0].status == .passed
+              && invalidReport.results[0].ok && invalidReport.results[0].fps == 0
+              && invalidReport.results[0].isNVIDIAConfirmed,
+              "text validity rules do not rewrite raw JSON status, ok, FPS, or NVIDIA evidence")
+        check(invalidReport.results[1].status == .passed && !invalidReport.results[1].ok
+              && invalidReport.results[1].fps == 240,
+              "contradictory raw success fields remain intact in schema-1 JSON")
 
         // 取消与未测试在总状态、逐项状态和导出的正文里均可区分。
         check(SelfTest.runState([]).contains("尚未测试"), "empty report is diagnostic only")

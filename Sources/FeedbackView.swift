@@ -133,7 +133,7 @@ struct FeedbackView: View {
                 Hairline(axis: .vertical)
                 ScrollView {
                     feedbackBody(draft: currentDraft)
-                        .padding(16)
+                        .padding(20)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -193,7 +193,7 @@ struct FeedbackView: View {
             Spacer()
             Button("完成") { presentationMode.wrappedValue.dismiss() }
                 .keyboardShortcut(.cancelAction)
-        }.padding(.horizontal, 16).padding(.vertical, 10)
+        }.padding(20)
     }
 
     private var historySidebar: some View {
@@ -269,55 +269,71 @@ struct FeedbackView: View {
     }
 
     private func feedbackBody(draft: GitHubIssueDraft?) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("反馈内容").font(DesignTokens.Font.title3)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("标题").font(DesignTokens.Font.small.weight(.medium)).foregroundColor(DesignTokens.Text.secondary)
-                TextField("概括发生的问题", text: $issueTitle).textFieldStyle(RoundedBorderTextFieldStyle())
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("问题现象与复现步骤").font(DesignTokens.Font.small.weight(.medium))
-                    .foregroundColor(DesignTokens.Text.secondary)
-                ZStack(alignment: .topLeading) {
-                    TextEditor(text: $problem).font(DesignTokens.Font.body).frame(height: 68)
-                    if problem.isEmpty {
-                        Text("例如：已安装驱动，但 H.264 硬编失败；点击开始后出现……")
-                            .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.placeholder)
-                            .padding(.horizontal, 5).padding(.vertical, 6).allowsHitTesting(false)
+        VStack(alignment: .leading, spacing: 16) {
+            FeedbackSectionHeading(title: "问题说明", subtitle: "概括现象并写下复现步骤")
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("标题").font(DesignTokens.Font.body.weight(.medium))
+                    TextField("概括发生的问题", text: $issueTitle)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .accessibilityLabel("反馈标题")
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("问题现象与复现步骤").font(DesignTokens.Font.body.weight(.medium))
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $problem).font(DesignTokens.Font.body).frame(height: 68)
+                        if problem.isEmpty {
+                            Text("例如：已安装驱动，但 H.264 硬编失败；点击开始后出现……")
+                                .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.placeholder)
+                                .padding(.horizontal, 5).padding(.vertical, 6).allowsHitTesting(false)
+                        }
                     }
-                }.overlay(RoundedRectangle(cornerRadius: DesignTokens.controlCorner)
-                    .strokeBorder(DesignTokens.Stroke.separator, lineWidth: hairline))
+                    .overlay(RoundedRectangle(cornerRadius: DesignTokens.controlCorner)
+                        .strokeBorder(DesignTokens.Stroke.separator, lineWidth: hairline))
+                }
             }
+            .modifier(PanelStyle(padding: 12))
+
             selectedDiagnosticSummary(draft: draft)
-            HStack(spacing: 8) {
-                Picker("预览内容", selection: $previewTab) {
-                    ForEach(PreviewTab.allCases) { tab in
-                        Text(tab == .full && usingEditedCopy ? "删减日志" : tab.rawValue)
-                            .tag(tab).disabled(usingEditedCopy && tab == .json)
-                    }
-                }.pickerStyle(SegmentedPickerStyle()).labelsHidden()
-                Spacer(minLength: 4)
-                Text(previewSizeLabel(draft: draft))
-                    .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary)
-                    .lineLimit(1).minimumScaleFactor(0.85)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    FeedbackSectionHeading(title: "发送内容预览", subtitle: "检查后可前往 GitHub")
+                    Spacer(minLength: 6)
+                    Text(previewSizeLabel(draft: draft))
+                        .font(DesignTokens.Font.small.monospacedDigit())
+                        .foregroundColor(DesignTokens.Text.secondary)
+                        .lineLimit(1).minimumScaleFactor(0.85)
+                }
+                HStack(spacing: 8) {
+                    Text("查看").font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary)
+                    Picker("预览内容", selection: $previewTab) {
+                        ForEach(PreviewTab.allCases) { tab in
+                            Text(tab == .full && usingEditedCopy ? "删减日志" : tab.rawValue)
+                                .tag(tab).disabled(usingEditedCopy && tab == .json)
+                        }
+                    }.pickerStyle(SegmentedPickerStyle()).labelsHidden()
+                }
+                FeedbackTextPreview(text: previewText(for: draft), usesMonospacedFont: previewTab != .draft)
+                    .frame(minHeight: 190, maxHeight: 320)
+                    .overlay(RoundedRectangle(cornerRadius: DesignTokens.controlCorner)
+                        .strokeBorder(DesignTokens.Stroke.separator, lineWidth: hairline))
+                    .accessibilityLabel("脱敏反馈内容预览，可选择和复制")
             }
-            FeedbackTextPreview(text: previewText(for: draft))
-                .frame(minHeight: 190, maxHeight: 320)
-                .overlay(RoundedRectangle(cornerRadius: DesignTokens.corner)
-                    .strokeBorder(DesignTokens.Stroke.separator, lineWidth: hairline))
+            .modifier(PanelStyle(padding: 12))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
     private func selectedDiagnosticSummary(draft: GitHubIssueDraft?) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("本次诊断").font(DesignTokens.Font.small.weight(.medium))
-                    .foregroundColor(DesignTokens.Text.secondary)
+                Image(systemName: "doc.text.magnifyingglass")
+                    .foregroundColor(.codecAccent).accessibilityHidden(true)
+                Text("本次诊断").font(DesignTokens.Font.body.weight(.semibold))
                 Text(selected?.title ?? "未选择诊断记录")
-                    .font(DesignTokens.Font.body.weight(.medium)).lineLimit(1)
-                Spacer(minLength: 8)
+                    .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary).lineLimit(1)
+                Spacer(minLength: 6)
                 if usingEditedCopy {
                     Text("删减副本 · 仅 TXT").font(DesignTokens.Font.small)
                         .foregroundColor(DesignTokens.Text.secondary)
@@ -339,6 +355,7 @@ struct FeedbackView: View {
                 Text("尚无诊断日志；当前网页草稿只会包含标题和问题说明。")
                     .font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary)
             }
+            Hairline()
             HStack(spacing: 8) {
                 Text(loading ? "正在读取本机记录…" : (draft.map(deliveryDescription) ?? "正在更新预览…"))
                     .font(DesignTokens.Font.small)
@@ -367,10 +384,7 @@ struct FeedbackView: View {
                 }.font(DesignTokens.Font.small).disabled(selected == nil)
             }
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: DesignTokens.corner).fill(DesignTokens.Surface.content))
-        .overlay(RoundedRectangle(cornerRadius: DesignTokens.corner)
-            .strokeBorder(DesignTokens.Stroke.separator, lineWidth: hairline))
+        .modifier(PanelStyle(padding: 12))
     }
 
     private func deliveryDescription(_ draft: GitHubIssueDraft) -> String {
@@ -427,7 +441,7 @@ struct FeedbackView: View {
             Button(previewTab == .draft ? "前往 GitHub 确认…" : "查看网页草稿", action: openGitHub)
                 .buttonStyle(NativeButtonStyle(prominent: true))
                 .disabled(draft == nil || loading)
-        }.padding(.horizontal, 16).padding(.vertical, 10)
+        }.padding(.horizontal, 20).padding(.vertical, 12)
     }
 
     private func scheduleDraftGeneration() {
@@ -629,16 +643,37 @@ private struct FeedbackListSurface: ViewModifier {
         }
     }
 }
+
+private struct FeedbackSectionHeading: View {
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(DesignTokens.Font.title3)
+            Text(subtitle).font(DesignTokens.Font.small).foregroundColor(DesignTokens.Text.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 /// macOS 11 也支持选择和复制的只读预览，不依赖后续系统的 Text.textSelection。
 private struct FeedbackTextPreview: NSViewRepresentable {
     let text: String
+    let usesMonospacedFont: Bool
+
+    private var previewFont: NSFont {
+        usesMonospacedFont
+            ? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+            : NSFont.systemFont(ofSize: 13, weight: .regular)
+    }
 
     func makeNSView(context: Context) -> NSScrollView {
         let view = NSTextView()
         view.isEditable = false
         view.isSelectable = true
         view.isRichText = false
-        view.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        view.font = previewFont
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = 2
         view.defaultParagraphStyle = paragraph
@@ -660,6 +695,10 @@ private struct FeedbackTextPreview: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let view = scroll.documentView as? NSTextView else { return }
+        if view.font?.fontName != previewFont.fontName || view.font?.pointSize != previewFont.pointSize {
+            view.font = previewFont
+            view.typingAttributes[.font] = previewFont
+        }
         if view.string != text { view.string = text }
     }
 }

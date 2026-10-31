@@ -16,12 +16,14 @@ swiftc -swift-version 5 -target "$(uname -m)-apple-macos11.0" \
 
 swiftc -swift-version 5 -target "$(uname -m)-apple-macos11.0" \
   "$DIAGNOSTIC_PROJECT_DIRECTORY/Sources/DiagnosticLog.swift" \
+  "$DIAGNOSTIC_PROJECT_DIRECTORY/Sources/MeasurementValidity.swift" \
   "$DIAGNOSTIC_PROJECT_DIRECTORY/Sources/Feedback.swift" \
   "$DIAGNOSTIC_TEST_DIRECTORY/FeedbackTests.swift" \
   -o "$DIAGNOSTIC_TEST_TEMP/feedback-tests" -framework Foundation
 "$DIAGNOSTIC_TEST_TEMP/feedback-tests"
 
 swiftc -swift-version 5 -target "$(uname -m)-apple-macos11.0" \
+  "$DIAGNOSTIC_PROJECT_DIRECTORY/Sources/MeasurementValidity.swift" \
   "$DIAGNOSTIC_PROJECT_DIRECTORY/Sources/BenchModels.swift" \
   "$DIAGNOSTIC_PROJECT_DIRECTORY/Sources/NullMothContract.swift" \
   "$DIAGNOSTIC_PROJECT_DIRECTORY/Sources/EnvProbe.swift" \

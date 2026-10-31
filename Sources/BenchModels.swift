@@ -127,6 +127,23 @@ struct BenchRow: Identifiable, Codable {
     let failureStage: String?
     let failureOSStatus: Int32?
 
+    /// True only when the run succeeded and produced a displayable positive finite rate.
+    /// This is derived from existing report fields and is not serialized.
+    var hasValidMeasurement: Bool {
+        MeasurementValidity.isValid(statusPassed: status == .passed, ok: ok, fps: fps)
+    }
+
+    /// Both display and text export use the same measured, matching software baseline.
+    func throughputRatio(comparedTo software: BenchRow) -> Double? {
+        guard hasValidMeasurement, hardwareAccelerated == true,
+              software.hasValidMeasurement, group == software.group, item == software.item,
+              group == "编码" || group == "解码",
+              software.mode == (group == "编码" ? "软件编码" : "软件解码"),
+              software.attribution == .software || software.hardwareAccelerated == false else { return nil }
+        let ratio = fps / software.fps
+        return ratio.isFinite && ratio > 0 ? ratio : nil
+    }
+
     /// 保留原有参数；新增证据均有默认值，旧调用不会因此产生 NVIDIA 结论。
     init(group: String, item: String, mode: String, ok: Bool, fps: Double,
          engine: String, detail: String, status: BenchStatus? = nil,

@@ -200,6 +200,39 @@ struct TestSelectionModelTests {
         check(failedBeforeFirstRow.totalCases == 2 && failedBeforeFirstRow.completedCount == 0,
               "changing selection after a worker fails before its first row keeps the failed round's denominator")
 
+        // Filtering and the model's success flags must agree with the visible measurement gate.
+        let validityModel = makeTestModel(factory)
+        for invalidFPS: Double in [0, -1, .nan, .infinity, -.infinity] {
+            let invalid = BenchRow(group: "编码", item: "H.264 1080p", mode: "强制硬件",
+                ok: true, fps: invalidFPS, engine: "fixture", detail: "invalid numeric fixture", status: .passed,
+                hardwareAccelerated: true, attribution: .nvidiaConfirmed, isNVIDIAConfirmed: true)
+            check(!ResultCategory.nvidia.includes(invalid) && !ResultCategory.systemHardware.includes(invalid)
+                  && !ResultCategory.otherHardware.includes(invalid) && !ResultCategory.software.includes(invalid)
+                  && ResultCategory.attention.includes(invalid) && ResultCategory.all.includes(invalid),
+                  "invalid FPS stays visible for diagnosis but cannot enter a successful result category: \(invalidFPS)")
+            validityModel.results = [invalid]
+            check(!validityModel.hwEncodeOK && !validityModel.nvidiaEncodeOK,
+                  "model encode success flags reject an invalid NVIDIA-tagged measurement: \(invalidFPS)")
+        }
+        let contradictory = BenchRow(group: "解码", item: "H.264 1080p", mode: "强制硬件",
+            ok: true, fps: 120, engine: "fixture", detail: "stored failure", status: .failed,
+            hardwareAccelerated: true, attribution: .nvidiaConfirmed, isNVIDIAConfirmed: true)
+        validityModel.results = [contradictory]
+        check(!validityModel.hwDecodeOK && !validityModel.nvidiaDecodeOK
+              && ResultCategory.attention.includes(contradictory),
+              "a positive FPS and NVIDIA tag cannot override a failed decode status")
+        let validHardware = BenchRow(group: "编码", item: "H.264 1080p", mode: "强制硬件",
+            ok: true, fps: 120, engine: "fixture", detail: "valid", status: .passed,
+            hardwareAccelerated: true, attribution: .nvidiaConfirmed, isNVIDIAConfirmed: true)
+        validityModel.results = [validHardware]
+        check(validityModel.hwEncodeOK && validityModel.nvidiaEncodeOK && ResultCategory.nvidia.includes(validHardware),
+              "normal measured NVIDIA results remain available to categories and model flags")
+        let validSoftware = BenchRow(group: "编码", item: "H.264 1080p", mode: "软件编码",
+            ok: true, fps: 60, engine: "fixture", detail: "valid software", status: .passed,
+            hardwareAccelerated: false, attribution: .software)
+        check(ResultCategory.software.includes(validSoftware) && !ResultCategory.nvidia.includes(validSoftware),
+              "valid software measurements remain a separate comparison category")
+
         if failures.isEmpty {
             print("Test selection model fixtures: \(checks) checks passed (shell workers; no GPU calls)")
         } else {

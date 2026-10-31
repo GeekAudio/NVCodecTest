@@ -9,7 +9,8 @@ enum CodecPresentation {
         case .failed: return ("失败", .statusError)
         case .passed:
             if !row.ok { return ("失败", .statusError) }
-            if row.isNVIDIAConfirmed { return ("NVIDIA 已证实", .statusSuccess) }
+            if !row.hasValidMeasurement { return ("测量值无效", .statusWarning) }
+            if row.isNVIDIAConfirmed && row.hardwareAccelerated == true { return ("NVIDIA 已证实", .statusSuccess) }
             if row.attribution == .otherHardware { return ("其他 GPU", .statusInfo) }
             if row.attribution == .software || row.hardwareAccelerated == false { return ("软件路径", .sub) }
             if row.hardwareAccelerated == true {
@@ -32,13 +33,19 @@ struct TestOverview: View {
     let finished: Bool
     let cancelled: Bool
     let running: Bool
-    private var passed: Int { rows.filter { $0.ok && $0.status == .passed }.count }
+    private var passed: Int { rows.filter(\.hasValidMeasurement).count }
+    private var invalidMeasurements: Int {
+        rows.filter { $0.status == .passed && $0.ok && !$0.hasValidMeasurement }.count
+    }
     private var failed: Int { rows.filter { $0.status == .failed }.count }
     private var summary: String {
         if cancelled { return "已取消" }
         if total == 0 { return "请选择测试项目" }
         if rows.isEmpty { return "3 次测量 · FPS 中位数" }
-        return "\(passed) 通过" + (failed > 0 ? " · \(failed) 失败" : "") + (running ? " · 进行中" : finished ? "" : " · 未完成") + " · 3 次中位数"
+        return "\(passed) 通过"
+            + (failed > 0 ? " · \(failed) 失败" : "")
+            + (invalidMeasurements > 0 ? " · \(invalidMeasurements) 项测量值无效" : "")
+            + (running ? " · 进行中" : finished ? "" : " · 未完成") + " · 3 次中位数"
     }
     var body: some View {
         HStack(spacing: 16) {
@@ -65,17 +72,17 @@ private struct OverviewPath: View {
     private var hardwarePlan: [BenchRow] { plan.filter { $0.group == group && $0.mode == "强制硬件" } }
     private var expected: Int { hardwarePlan.count }
     private var hardwareRows: [BenchRow] { rows.filter { $0.group == group && $0.mode == "强制硬件" } }
-    private var passed: Int { hardwareRows.filter { $0.ok && $0.status == .passed }.count }
-    private var confirmed: Int { hardwareRows.filter { $0.ok && $0.isNVIDIAConfirmed }.count }
+    private var passed: Int { hardwareRows.filter(\.hasValidMeasurement).count }
+    private var confirmed: Int { hardwareRows.filter { $0.hasValidMeasurement && $0.hardwareAccelerated == true && $0.isNVIDIAConfirmed }.count }
     private var identity: String {
         if expected == 0 { return "本轮未选" }
         if confirmed > 0 { return "NVIDIA \(confirmed) 项" }
-        let other = hardwareRows.filter { $0.ok && $0.status == .passed && $0.attribution == .otherHardware }.count
+        let other = hardwareRows.filter { $0.hasValidMeasurement && $0.attribution == .otherHardware }.count
         if other > 0 { return "其他 GPU \(other) 项" }
         if passed > 0 { return "归属待确认" }
         return hardwareRows.isEmpty ? "待测" : "未证实"
     }
-    private func count(_ format: String) -> Int { hardwareRows.filter { $0.item.hasPrefix(format) && $0.ok && $0.status == .passed }.count }
+    private func count(_ format: String) -> Int { hardwareRows.filter { $0.item.hasPrefix(format) && $0.hasValidMeasurement }.count }
     private func expectedCount(_ format: String) -> Int { hardwarePlan.filter { $0.item.hasPrefix(format) }.count }
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -138,7 +145,8 @@ struct CodecCaseCard: View {
     private var status: (String, Color) { CodecPresentation.classification(row) }
     private var statusSymbol: String {
         if active { return "hourglass" }
-        if row.status == .passed && row.ok { return "checkmark.circle" }
+        if row.hasValidMeasurement { return "checkmark.circle" }
+        if row.status == .passed && row.ok { return "exclamationmark.triangle" }
         return row.status == .failed ? "exclamationmark.circle" : "circle.dotted"
     }
     private var accessibilityTitle: String {
@@ -149,7 +157,9 @@ struct CodecCaseCard: View {
             Button(action: action) { cardSurface }
                 .buttonStyle(CardButtonStyle(selected: selected, measuring: active))
                 .accessibilityLabel(Text(accessibilityTitle))
-                .accessibilityValue(Text(row.ok ? String(format: "%.1f FPS", row.fps) : "无测量值"))
+                .accessibilityValue(Text(row.hasValidMeasurement
+                    ? String(format: "%.1f FPS", row.fps)
+                    : "无有效测量值（\(row.status.rawValue)）"))
                 .accessibilityAddTraits(selected ? .isSelected : [])
                 .help(row.detail)
             Toggle("加入测试：\(row.group) \(row.item) \(row.mode)", isOn: $included)
@@ -173,9 +183,9 @@ struct CodecCaseCard: View {
                 Text(row.group).font(DesignTokens.Font.small).foregroundColor(.sub).fixedSize()
             }
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(row.ok && row.status == .passed ? String(format: "%.1f", row.fps) : "—")
+                Text(row.hasValidMeasurement ? String(format: "%.1f", row.fps) : "—")
                     .font(DesignTokens.Font.title1.weight(.medium).monospacedDigit())
-                    .foregroundColor(row.ok && row.status == .passed ? .txt : DesignTokens.Text.placeholder)
+                    .foregroundColor(row.hasValidMeasurement ? .txt : DesignTokens.Text.placeholder)
                     .minimumScaleFactor(0.8).lineLimit(1).layoutPriority(1)
                 Text("FPS").font(DesignTokens.Font.small).foregroundColor(.sub).fixedSize()
                 Spacer(minLength: 0)
@@ -194,9 +204,10 @@ struct CodecCaseCard: View {
     private var measurementText: String {
         if active { return phase }
         if let code = row.failureOSStatus { return (row.failureStage ?? "VT 错误") + " · \(code)" }
+        if row.status == .passed && row.ok && !row.hasValidMeasurement { return "测量值无效" }
         let mode = row.mode.hasPrefix("软件") ? "软件对照" : "强制硬件"
         guard let stats = row.statistics else { return mode + " · 预热 8 帧" }
-        if !row.ok { return "输出 \(stats.frames)/\(stats.requestedFrames) 帧" }
+        if !row.hasValidMeasurement { return "输出 \(stats.frames)/\(stats.requestedFrames) 帧" }
         return mode + " · \(stats.frames) 帧"
     }
 }
@@ -215,6 +226,9 @@ struct DetailWindow<Content: View>: View {
             }.padding(20)
             Hairline()
             ScrollView { content.padding(20).frame(maxWidth: .infinity, alignment: .leading) }
-        }.frame(width: 760, height: 600).background(DesignTokens.Surface.window)
+        }
+        .font(DesignTokens.Font.body)
+        .frame(width: 760, height: 600).background(DesignTokens.Surface.window)
+        .onExitCommand { presentation.wrappedValue.dismiss() }
     }
 }

@@ -6,6 +6,7 @@ SELECTION_TEST_TEMP="$(mktemp -d "${TMPDIR:-/tmp}/nvcodec-selection-tests.XXXXXX
 trap 'rm -rf "$SELECTION_TEST_TEMP"' EXIT
 
 swiftc -swift-version 5 -target "$(uname -m)-apple-macos11.0" \
+  "$SELECTION_PROJECT_DIRECTORY/Sources/MeasurementValidity.swift" \
   "$SELECTION_PROJECT_DIRECTORY/Sources/BenchModels.swift" \
   "$SELECTION_PROJECT_DIRECTORY/Sources/NullMothContract.swift" \
   "$SELECTION_PROJECT_DIRECTORY/Sources/EnvProbe.swift" \

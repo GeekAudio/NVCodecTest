@@ -60,7 +60,7 @@ enum TestHistoryMatrix {
         let title = caseDescription(caseID)
         switch result.status {
         case .passed:
-            guard result.ok, result.fps.isFinite, result.fps > 0 else {
+            guard result.hasValidMeasurement else {
                 return TestHistoryMatrixCell(caseID: caseID, value: "待验证",
                     help: "\(title)\n状态写为通过，但没有有效的正数 FPS。\n\(result.detail)")
             }

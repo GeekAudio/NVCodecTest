@@ -16,7 +16,7 @@ enum ResultCategory: String, CaseIterable, Identifiable {
         }
     }
     func includes(_ row: BenchRow) -> Bool {
-        let passed = row.ok && row.status == .passed
+        let passed = row.hasValidMeasurement
         switch self {
         case .all: return true
         case .nvidia: return passed && row.hardwareAccelerated == true && row.isNVIDIAConfirmed
@@ -146,8 +146,8 @@ final class TestModel: ObservableObject {
     }
     var totalCases: Int { displayedCaseIDs.count }
     var completedCount: Int { results.filter { displayedCaseIDs.contains($0.id) && $0.status != .notTested && $0.status != .cancelled }.count }
-    var hwEncodeOK: Bool { encodeRows.contains { $0.ok && $0.hardwareAccelerated == true } }
-    var hwDecodeOK: Bool { decodeRows.contains { $0.ok && $0.hardwareAccelerated == true } }
+    var hwEncodeOK: Bool { encodeRows.contains { $0.hasValidMeasurement && $0.hardwareAccelerated == true } }
+    var hwDecodeOK: Bool { decodeRows.contains { $0.hasValidMeasurement && $0.hardwareAccelerated == true } }
     var nvidiaEncodeOK: Bool { encodeRows.contains { ResultCategory.nvidia.includes($0) } }
     var nvidiaDecodeOK: Bool { decodeRows.contains { ResultCategory.nvidia.includes($0) } }
 

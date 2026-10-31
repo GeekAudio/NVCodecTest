@@ -8,6 +8,7 @@ SESSION_PROJECT_DIRECTORY="${SESSION_TEST_DIRECTORY%/Tests}"
 SESSION_TEST_TEMP="$(mktemp -d "${TMPDIR:-/tmp}/nvcodec-session-tests.XXXXXX")"
 trap 'rm -rf "$SESSION_TEST_TEMP"' EXIT
 SESSION_CORE_SOURCES=(
+  "$SESSION_PROJECT_DIRECTORY/Sources/MeasurementValidity.swift"
   "$SESSION_PROJECT_DIRECTORY/Sources/BenchModels.swift"
   "$SESSION_PROJECT_DIRECTORY/Sources/NullMothContract.swift"
   "$SESSION_PROJECT_DIRECTORY/Sources/EnvProbe.swift"

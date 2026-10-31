@@ -6,6 +6,7 @@ HISTORY_TEST_TEMP="$(mktemp -d "${TMPDIR:-/tmp}/nvcodec-history-tests.XXXXXX")"
 trap 'rm -rf "$HISTORY_TEST_TEMP"' EXIT
 
 swiftc -swift-version 5 -target "$(uname -m)-apple-macos11.0" \
+  "$HISTORY_PROJECT_DIRECTORY/Sources/MeasurementValidity.swift" \
   "$HISTORY_PROJECT_DIRECTORY/Sources/BenchModels.swift" \
   "$HISTORY_PROJECT_DIRECTORY/Sources/CodecTestPlan.swift" \
   "$HISTORY_PROJECT_DIRECTORY/Sources/NullMothContract.swift" \

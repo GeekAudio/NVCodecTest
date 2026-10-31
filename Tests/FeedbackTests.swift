@@ -11,6 +11,24 @@ struct FeedbackTests {
             checks += 1
             if !condition() { failures.append(name) }
         }
+        check(MeasurementValidity.isValid(statusPassed: true, ok: true, fps: 0.1),
+              "a positive finite FPS with passed status and ok is a valid measurement")
+        check(!MeasurementValidity.isValid(statusPassed: false, ok: true, fps: 60),
+              "a non-passed row cannot become a valid measurement")
+        check(!MeasurementValidity.isValid(statusPassed: true, ok: false, fps: 60),
+              "a row with ok=false cannot become a valid measurement")
+        check(!MeasurementValidity.isValid(statusPassed: true, ok: true, fps: 0),
+              "zero FPS is not a valid measurement")
+        check(!MeasurementValidity.isValid(statusPassed: true, ok: true, fps: -1),
+              "negative FPS is not a valid measurement")
+        check(!MeasurementValidity.isValid(statusPassed: true, ok: true, fps: .nan),
+              "NaN FPS is not a valid measurement")
+        check(!MeasurementValidity.isValid(statusPassed: true, ok: true, fps: .infinity),
+              "infinite FPS is not a valid measurement")
+        check(!MeasurementValidity.isValid(statusPassed: true, ok: true, fps: -.infinity),
+              "negative infinite FPS is not a valid measurement")
+        check(!MeasurementValidity.isValid(statusPassed: true, ok: true, fps: nil),
+              "a missing FPS is not a valid measurement")
         func query(_ draft: GitHubIssueDraft) -> [String: String] {
             guard let url = draft.url, let parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return [:] }
             return Dictionary(parts.queryItems?.map { ($0.name, $0.value ?? "") } ?? [], uniquingKeysWith: { first, _ in first })
@@ -196,6 +214,40 @@ struct FeedbackTests {
             let earlyCancellation = CompactDiagnosticSummary.make(reportJSON: "{\"appVersion\":\"1.3.0\",\"wasCancelled\":true,\"results\":[{\"group\":\"解码\",\"item\":\"H.264 1080p\",\"mode\":\"强制硬件\",\"status\":\"未测试\",\"ok\":false}]}") ?? ""
             check(earlyCancellation.contains("STATE=cancelled") && earlyCancellation.contains("not-tested"), "early-cancelled summaries retain both run cancellation and untested row status")
             check(earlyCancellation.contains("f=?/?") && earlyCancellation.contains("HW=?"), "missing measurements remain unknown instead of invented zero-frame or hardware results")
+            let invalidPassed = CompactDiagnosticSummary.make(reportJSON: "{\"appVersion\":\"1.6.1\",\"results\":[{\"group\":\"编码\",\"item\":\"HEVC 1080p\",\"mode\":\"强制硬件\",\"status\":\"成功\",\"ok\":true,\"fps\":0,\"hardwareAccelerated\":true,\"isNVIDIAConfirmed\":true}]}") ?? ""
+            let invalidPassedLine = invalidPassed.components(separatedBy: "\n").first { $0.hasPrefix("E HEVC 1080p") } ?? ""
+            check(invalidPassedLine.contains("unverified fps=?"), "a passed row with zero FPS is projected as unverified without a reported result FPS")
+            check(invalidPassedLine.contains("raw_status=成功 raw_ok=true raw_fps=0.0"), "an invalid passed row keeps short raw status, ok, and FPS clues")
+            check(invalidPassedLine.contains("NV=unconfirmed") && !invalidPassedLine.contains("NV=confirmed"), "invalid measurements cannot confirm NVIDIA attribution")
+            let booleanFPS = CompactDiagnosticSummary.make(reportJSON: "{\"appVersion\":\"1.6.1\",\"results\":[{\"group\":\"编码\",\"item\":\"H.264 1080p\",\"mode\":\"强制硬件\",\"status\":\"passed\",\"ok\":true,\"fps\":true,\"hardwareAccelerated\":true,\"isNVIDIAConfirmed\":true}]}") ?? ""
+            let booleanFPSLine = booleanFPS.components(separatedBy: "\n").first { $0.hasPrefix("E H264 1080p") } ?? ""
+            check(booleanFPSLine.contains("unverified fps=?") && booleanFPSLine.contains("raw_fps=true"), "a JSON boolean is not accepted as numeric FPS")
+            check(booleanFPSLine.contains("NV=unconfirmed"), "boolean FPS cannot confirm NVIDIA attribution")
+            let numericOK = CompactDiagnosticSummary.make(reportJSON: "{\"appVersion\":\"1.6.1\",\"results\":[{\"group\":\"编码\",\"item\":\"H.264 1080p\",\"mode\":\"强制硬件\",\"status\":\"passed\",\"ok\":1,\"fps\":10,\"hardwareAccelerated\":true,\"isNVIDIAConfirmed\":true}]}") ?? ""
+            let numericOKLine = numericOK.components(separatedBy: "\n").first { $0.hasPrefix("E H264 1080p") } ?? ""
+            check(numericOKLine.contains("unverified fps=?") && numericOKLine.contains("raw_ok=1.0"), "a JSON number is not accepted as the result ok flag")
+            let missingOK = CompactDiagnosticSummary.make(reportJSON: "{\"appVersion\":\"1.6.1\",\"results\":[{\"group\":\"编码\",\"item\":\"H.264 1080p\",\"mode\":\"强制硬件\",\"status\":\"passed\",\"fps\":10}]}") ?? ""
+            let missingOKLine = missingOK.components(separatedBy: "\n").first { $0.hasPrefix("E H264 1080p") } ?? ""
+            check(missingOKLine.contains("unverified fps=?") && missingOKLine.contains("raw_ok=unreported"), "a missing ok flag leaves the passed row unverified")
+            let missingFPS = CompactDiagnosticSummary.make(reportJSON: "{\"appVersion\":\"1.6.1\",\"results\":[{\"group\":\"编码\",\"item\":\"H.264 1080p\",\"mode\":\"强制硬件\",\"status\":\"passed\",\"ok\":true}]}") ?? ""
+            let missingFPSLine = missingFPS.components(separatedBy: "\n").first { $0.hasPrefix("E H264 1080p") } ?? ""
+            check(missingFPSLine.contains("unverified fps=?") && missingFPSLine.contains("raw_fps=unreported"), "a missing FPS leaves the passed row unverified")
+            let missingStatus = CompactDiagnosticSummary.make(reportJSON: "{\"appVersion\":\"1.6.1\",\"results\":[{\"group\":\"编码\",\"item\":\"H.264 1080p\",\"mode\":\"强制硬件\",\"ok\":true,\"fps\":10,\"hardwareAccelerated\":true,\"isNVIDIAConfirmed\":true}]}") ?? ""
+            let missingStatusLine = missingStatus.components(separatedBy: "\n").first { $0.hasPrefix("E H264 1080p") } ?? ""
+            check(missingStatusLine.contains("unreported fps=?") && missingStatusLine.contains("raw_status=unreported raw_ok=true raw_fps=10.0"), "a missing status is not inferred as passed and retains raw ok/FPS clues")
+            check(missingStatusLine.contains("NV=unconfirmed"), "a missing status cannot confirm NVIDIA attribution")
+            let numericHardware = CompactDiagnosticSummary.make(reportJSON: "{\"appVersion\":\"1.6.1\",\"results\":[{\"group\":\"编码\",\"item\":\"H.264 1080p\",\"mode\":\"强制硬件\",\"status\":\"passed\",\"ok\":true,\"fps\":10,\"hardwareAccelerated\":1,\"isNVIDIAConfirmed\":true}]}") ?? ""
+            let numericHardwareLine = numericHardware.components(separatedBy: "\n").first { $0.hasPrefix("E H264 1080p") } ?? ""
+            check(numericHardwareLine.contains("fps=10.0") && numericHardwareLine.contains("HW=? NV=unconfirmed"), "numeric hardware flags are not accepted as JSON booleans")
+            let numericNVIDIA = CompactDiagnosticSummary.make(reportJSON: "{\"appVersion\":\"1.6.1\",\"results\":[{\"group\":\"编码\",\"item\":\"H.264 1080p\",\"mode\":\"强制硬件\",\"status\":\"passed\",\"ok\":true,\"fps\":10,\"hardwareAccelerated\":true,\"isNVIDIAConfirmed\":1}]}") ?? ""
+            let numericNVIDIALine = numericNVIDIA.components(separatedBy: "\n").first { $0.hasPrefix("E H264 1080p") } ?? ""
+            check(numericNVIDIALine.contains("HW=1 NV=unconfirmed"), "a numeric NVIDIA flag is not accepted as a JSON boolean")
+            let negativePassed = CompactDiagnosticSummary.make(reportJSON: "{\"appVersion\":\"1.6.1\",\"results\":[{\"group\":\"解码\",\"item\":\"H.264 1080p\",\"mode\":\"强制硬件\",\"status\":\"passed\",\"ok\":true,\"fps\":-2,\"hardwareAccelerated\":true,\"isNVIDIAConfirmed\":true}]}") ?? ""
+            let negativePassedLine = negativePassed.components(separatedBy: "\n").first { $0.hasPrefix("D H264 1080p") } ?? ""
+            check(negativePassedLine.contains("unverified fps=?") && negativePassedLine.contains("raw_fps=-2.0"), "negative FPS remains diagnostic raw evidence but not an effective measurement")
+            check(negativePassedLine.contains("NV=unconfirmed"), "negative FPS cannot produce confirmed NVIDIA attribution")
+            let failedRow = CompactDiagnosticSummary.make(reportJSON: "{\"appVersion\":\"1.6.1\",\"results\":[{\"group\":\"解码\",\"item\":\"HEVC 1080p\",\"mode\":\"强制硬件\",\"status\":\"失败\",\"ok\":false,\"fps\":-1}]}") ?? ""
+            check(failedRow.contains("D HEVC 1080p HW failed fps=?"), "failed status stays failed and does not expose invalid FPS")
         } catch { check(false, "schema-based default feedback fixture must remain valid") }
 
         if failures.isEmpty {

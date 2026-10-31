@@ -78,17 +78,20 @@ enum SelfTest {
 
     static func verdict(group: String, rows: [BenchRow]) -> String {
         let hardware = rows.filter { $0.group == group && $0.mode == "强制硬件" }
-        let confirmed = hardware.filter { $0.ok && $0.status == .passed && $0.hardwareAccelerated == true && $0.isNVIDIAConfirmed }
+        let confirmed = hardware.filter { $0.hasValidMeasurement && $0.hardwareAccelerated == true && $0.isNVIDIAConfirmed }
         if !confirmed.isEmpty {
             return "已确认 NVIDIA 路径：" + confirmed.map(\.item).joined(separator: "、")
         }
-        if hardware.contains(where: { $0.ok && $0.status == .passed && $0.hardwareAccelerated == true && $0.attribution == .otherHardware }) {
+        if hardware.contains(where: { $0.hasValidMeasurement && $0.hardwareAccelerated == true && $0.attribution == .otherHardware }) {
             return "其他 GPU 的硬件测试通过；本次未证实 NVIDIA 路径"
         }
-        if hardware.contains(where: { $0.ok && $0.status == .passed && $0.hardwareAccelerated == true }) {
+        if hardware.contains(where: { $0.hasValidMeasurement && $0.hardwareAccelerated == true }) {
             return "系统硬件测试通过，NVIDIA 归属未确认"
         }
         if hardware.isEmpty || hardware.allSatisfy({ $0.status == .notTested }) { return "未测试" }
+        if hardware.contains(where: { $0.status == .passed && !$0.hasValidMeasurement }) {
+            return "结果待验证：成功标记或 FPS 数值无效"
+        }
         if hardware.contains(where: { $0.status == .unverified }) { return "路径待验证，详见原始证据" }
         if hardware.contains(where: { $0.status == .cancelled }) { return "已取消，尚未确认" }
         return "本次未通过；失败原因不等于驱动未安装"
@@ -102,6 +105,10 @@ enum SelfTest {
         case .notTested: return "未测试"
         case .cancelled: return "已取消"
         }
+    }
+
+    static func statusLabel(_ row: BenchRow) -> String {
+        row.status == .passed && !row.hasValidMeasurement ? "待验证" : statusLabel(row.status)
     }
 
     private static func planDescription(_ plannedCaseIDs: [String]?, results: [BenchRow]) -> String? {
@@ -145,21 +152,26 @@ enum SelfTest {
         if !results.isEmpty {
             lines += ["", "【实测结果】"]
             for row in results {
-                lines.append("\(row.group) · \(row.item) · \(row.mode) · \(statusLabel(row.status))")
-                if row.ok { lines.append(String(format: "  吞吐：%.2f fps", row.fps)) }
+                lines.append("\(row.group) · \(row.item) · \(row.mode) · \(statusLabel(row))")
+                lines.append("  原始字段：status=\(row.status.rawValue) · ok=\(row.ok) · fps=\(row.fps) · NVIDIA标记=\(row.isNVIDIAConfirmed)")
+                if row.hasValidMeasurement { lines.append(String(format: "  吞吐：%.2f fps", row.fps)) }
                 lines.append("  实际引擎：\(row.engine)")
-                lines.append("  NVIDIA 归属：\(row.isNVIDIAConfirmed ? "已确认" : "未确认")")
+                let nvidiaConfirmed = row.hasValidMeasurement && row.hardwareAccelerated == true
+                    && row.isNVIDIAConfirmed
+                let nvidiaAttribution = nvidiaConfirmed ? "已确认"
+                    : row.hasValidMeasurement ? "未确认"
+                    : "待验证（原始确认标记：\(row.isNVIDIAConfirmed ? "是" : "否")）"
+                lines.append("  NVIDIA 归属：\(nvidiaAttribution)")
                 lines.append("  \(row.detail)")
                 lines.append("")
             }
             lines.append("【同负载吞吐对照（未匹配输出画质）】")
-            for hardware in results where hardware.ok && hardware.mode == "强制硬件" {
-                let softwareMode = hardware.group == "编码" ? "软件编码" : "软件解码"
-                if let software = results.first(where: {
-                    $0.ok && $0.group == hardware.group && $0.item == hardware.item && $0.mode == softwareMode
-                }), software.fps > 0 {
+            for hardware in results {
+                for software in results where software.group == hardware.group && software.item == hardware.item {
+                    guard let ratio = hardware.throughputRatio(comparedTo: software) else { continue }
                     lines.append(String(format: "%@ %@：硬件 / 软件 = %.2f×；仅限本次设置和输入。",
-                                        hardware.group, hardware.item, hardware.fps / software.fps))
+                                        hardware.group, hardware.item, ratio))
+                    break
                 }
             }
         }

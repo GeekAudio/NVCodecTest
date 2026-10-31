@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 
 /// 预览、导出和网页草稿共用的已脱敏诊断。构造时再次脱敏，避免调用方绕过预览层。
 struct FeedbackDiagnostic: Identifiable {
@@ -85,15 +86,31 @@ enum CompactDiagnosticSummary {
         let mode = string(row["mode"]) ?? "?"
         let path = mode == "强制硬件" || mode.lowercased().contains("forced") ? "HW"
             : (mode.contains("软件") || mode.lowercased().contains("soft") ? "SW" : (mode.contains("自动") ? "AUTO" : mode))
-        let status = state(string(row["status"]) ?? (bool(row["ok"]) == true ? "passed" : "unreported"))
+        let ok = resultBoolean(row["ok"])
+        let reportedStatus = string(row["status"])
+        let rawStatus = reportedStatus ?? "unreported"
+        let normalizedStatus = state(rawStatus)
+        let fpsValue = resultNumber(row["fps"])?.doubleValue
+        let validMeasurement = MeasurementValidity.isValid(
+            statusPassed: normalizedStatus == "passed", ok: ok == true, fps: fpsValue)
+        // A nominally passed row without a positive finite measurement is not a measured pass.
+        // Keep its original clues in the compact projection so the mismatch is diagnosable.
+        let status = normalizedStatus == "passed" && !validMeasurement ? "unverified" : normalizedStatus
         let stats = row["statistics"] as? [String: Any] ?? [:]
         let requested = integer(stats["requestedFrames"] ?? row["requestedFrames"])
         let frames = integer(stats["frames"] ?? row["frames"])
         let submitted = integer(stats["submittedFrames"] ?? row["submittedFrames"])
-        let hardware = bool(row["hardwareAccelerated"]).map { $0 ? "1" : "0" } ?? "?"
-        let nvidia = bool(row["isNVIDIAConfirmed"]) == true ? "confirmed" : "unconfirmed"
-        let fps = (row["fps"] as? NSNumber).map { String(format: "%.1f", $0.doubleValue) } ?? "?"
+        let hardwareValue = resultBoolean(row["hardwareAccelerated"])
+        let hardware = hardwareValue.map { $0 ? "1" : "0" } ?? "?"
+        let nvidia = validMeasurement && hardwareValue == true && resultBoolean(row["isNVIDIAConfirmed"]) == true
+            ? "confirmed" : "unconfirmed"
+        let fps: String
+        if validMeasurement, let fpsValue { fps = String(format: "%.1f", fpsValue) }
+        else { fps = "?" }
         var line = "\(direction) \(item) \(path) \(status) fps=\(fps) f=\(frames)/\(requested) sub=\(submitted)/\(requested) HW=\(hardware) NV=\(nvidia)"
+        if reportedStatus == nil || (normalizedStatus == "passed" && !validMeasurement) {
+            line += " raw_status=\(rawStatus) raw_ok=\(diagnosticScalar(row["ok"])) raw_fps=\(diagnosticScalar(row["fps"]))"
+        }
         if row["gpuRegistryID"] == nil || row["gpuRegistryID"] is NSNull { line += " GPU=unreported" }
         else if let vendor = row["gpuVendorID"] as? NSNumber { line += String(format: " GPUvendor=0x%04x", vendor.uint32Value) }
         else { line += " GPU=reported/vendor-unknown" }
@@ -129,8 +146,21 @@ enum CompactDiagnosticSummary {
         guard let text = value as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return text.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")
     }
-    private static func integer(_ value: Any?) -> String { (value as? NSNumber).map { String($0.intValue) } ?? "?" }
+    private static func integer(_ value: Any?) -> String { resultNumber(value).map { String($0.intValue) } ?? "?" }
     private static func bool(_ value: Any?) -> Bool? { value as? Bool }
+    private static func resultNumber(_ value: Any?) -> NSNumber? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        return number
+    }
+    private static func resultBoolean(_ value: Any?) -> Bool? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
+    }
+    private static func diagnosticScalar(_ value: Any?) -> String {
+        if let boolean = resultBoolean(value) { return boolean ? "true" : "false" }
+        if let number = resultNumber(value) { return String(number.doubleValue) }
+        return string(value) ?? "unreported"
+    }
     private static func firstMatch(_ text: String, pattern: String) -> String? { matches(text, pattern: pattern).first }
     private static func matches(_ text: String, pattern: String) -> [String] {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }

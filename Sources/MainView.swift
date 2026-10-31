@@ -18,6 +18,14 @@ struct MainView: View {
     private var selected: BenchRow? { model.results.first { $0.id == selectedID } }
     private var focusedCase: BenchRow? { plannedRows.first { $0.id == selectedID } }
     private var overviewPlan: [BenchRow] { CodecPresentation.plan.filter { model.displayedCaseIDs.contains($0.id) } }
+    private var selectedSoftwareRatio: Double? {
+        guard let row = selected, row.hasValidMeasurement, row.hardwareAccelerated == true,
+              let software = model.results.first(where: {
+                  $0.group == row.group && $0.item == row.item && ResultCategory.software.includes($0)
+                      && $0.hasValidMeasurement
+              }) else { return nil }
+        return row.throughputRatio(comparedTo: software)
+    }
     private var startTitle: String {
         if model.selectedCaseIDs.count != CodecPresentation.plan.count { return "测试所选" }
         return model.tested ? "重新测试" : "开始测试"
@@ -161,14 +169,13 @@ struct MainView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(focusedCase.map { $0.group + " · " + $0.item + " · " + $0.mode } ?? "选中项目的验证依据")
                     .font(DesignTokens.Font.body.weight(.semibold)).lineLimit(1)
-                Text(selected.map { !$0.ok || $0.engine.isEmpty || $0.engine == "—" ? $0.detail : $0.engine + " · " + ($0.nvidiaEvidence.isEmpty ? $0.hardwareEvidence : $0.nvidiaEvidence) }
+                Text(selected.map { !$0.hasValidMeasurement || $0.engine.isEmpty || $0.engine == "—" ? $0.detail : $0.engine + " · " + ($0.nvidiaEvidence.isEmpty ? $0.hardwareEvidence : $0.nvidiaEvidence) }
                      ?? "勾选卡片加入测试；也可单独运行当前项。每轮结果独立记录。")
                     .font(DesignTokens.Font.small).foregroundColor(.sub).lineLimit(2)
             }
             Spacer(minLength: 8)
-            if let row = selected, row.ok, row.hardwareAccelerated == true,
-               let software = model.results.first(where: { $0.group == row.group && $0.item == row.item && ResultCategory.software.includes($0) }), software.fps > 0 {
-                Text(String(format: "本负载 %.2f× 软件", row.fps / software.fps))
+            if let selectedSoftwareRatio {
+                Text(String(format: "本负载 %.2f× 软件", selectedSoftwareRatio))
                     .font(DesignTokens.Font.small).foregroundColor(.sub)
             }
             Button("单独测试") { if let focusedCase { model.startSingle(focusedCase.id) } }
