@@ -17,10 +17,16 @@ struct TestHistoryMatrixCell: Identifiable {
 struct TestHistoryMatrixRow: Identifiable {
     let id: String
     let createdAt: Date
-    let appVersion: String
+    let driverVersion: TestHistoryDriverVersion
     let passedSummary: String
     let context: String
     let cells: [TestHistoryMatrixCell]
+}
+
+struct TestHistoryDriverVersion {
+    let value: String
+    let sourceLabel: String?
+    let help: String
 }
 
 enum TestHistoryMatrix {
@@ -33,9 +39,35 @@ enum TestHistoryMatrix {
             let plannedCount = plannedIDs(report).count
             let passedCount = cells.filter { $0.value.hasSuffix(" FPS") }.count
             return TestHistoryMatrixRow(id: entry.id, createdAt: entry.createdAt,
-                appVersion: report.appVersion, passedSummary: "\(passedCount)/\(plannedCount)",
+                driverVersion: driverVersion(in: report), passedSummary: "\(passedCount)/\(plannedCount)",
                 context: contextDescription(report), cells: cells)
         }
+    }
+
+    private static func driverVersion(in report: CodecReport) -> TestHistoryDriverVersion {
+        guard let driver = report.driverReport else {
+            return TestHistoryDriverVersion(value: "未记录", sourceLabel: nil,
+                help: "这轮历史没有保存 NVIDIA / NullMoth 驱动版本，不使用当前驱动或应用版本补值。")
+        }
+        let version = driver.version?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let version, !version.isEmpty else {
+            var help = "本轮未记录可确认的 NVIDIA / NullMoth 驱动版本。\n状态：\(driver.summary)"
+            if let installed = driver.installedVersion {
+                help += "\n磁盘安装版本：\(installed)；不代表本轮加载版本。"
+            }
+            return TestHistoryDriverVersion(value: "未记录", sourceLabel: nil, help: help)
+        }
+        let source = driver.versionSource ?? "来源未记录"
+        let label: String?
+        if source.hasPrefix("磁盘") { label = "磁盘" }
+        else if source.contains("标记") { label = "标记" }
+        else { label = driver.runtimeConfirmed ? nil : "未确认" }
+        var help = "本轮 NVIDIA / NullMoth 驱动版本：\(version)\n来源：\(source)\n状态：\(driver.summary)"
+        if !driver.runtimeConfirmed { help += "\n安装文件或版本标记不代表本轮运行版本已确认。" }
+        if driver.runtimeConfirmed, let installed = driver.installedVersion, installed != version {
+            help += "\n磁盘安装版本：\(installed)；与本轮加载版本分开记录。"
+        }
+        return TestHistoryDriverVersion(value: version, sourceLabel: label, help: help)
     }
 
     static func newestFirst(_ entries: [TestHistoryEntry]) -> [TestHistoryEntry] {
@@ -100,7 +132,7 @@ enum TestHistoryMatrix {
         let environment = report.environment
             .filter { environmentKeys.contains($0.key) }
             .map { "\($0.key)：\($0.value)" }
-        var details = [report.runState] + environment
+        var details = [report.runState, "应用版本：\(report.appVersion)"] + environment
         if let driverReport = report.driverReport { details.append("驱动：\(driverReport.summary)") }
         return details.joined(separator: "\n")
     }

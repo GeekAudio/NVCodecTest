@@ -143,7 +143,8 @@ struct TestHistoryView: View {
             HStack(spacing: 0) {
                 Text("测试时间").padding(.leading, 8)
                     .frame(width: HistoryTableLayout.dateWidth, alignment: .leading)
-                Text("版本").frame(width: HistoryTableLayout.versionWidth)
+                Text("驱动版本").frame(width: HistoryTableLayout.versionWidth)
+                    .help("各轮历史记录中的 NVIDIA / NullMoth 驱动版本")
                 Text("通过 / 计划").frame(width: HistoryTableLayout.countWidth)
                 ForEach(TestHistoryMatrix.cases) { testCase in
                     VStack(spacing: 4) {
@@ -216,8 +217,8 @@ struct TestHistoryView: View {
 
 private enum HistoryTableLayout {
     static let dateWidth: CGFloat = 128
-    static let versionWidth: CGFloat = 56
-    static let countWidth: CGFloat = 64
+    static let versionWidth: CGFloat = 64
+    static let countWidth: CGFloat = 56
     static let scoreWidth: CGFloat = 80
     static let summaryWidth = dateWidth + versionWidth + countWidth
     static let width = summaryWidth + scoreWidth * 9
@@ -266,12 +267,16 @@ private struct HistoryRunRow: View {
                 .padding(.leading, 8)
                 .frame(width: HistoryTableLayout.dateWidth, alignment: .leading)
                 .help(row.context)
-            Text("v\(row.appVersion)")
-                .foregroundColor(DesignTokens.Text.secondary)
-                .frame(width: HistoryTableLayout.versionWidth)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .help("应用版本：\(row.appVersion)")
+            VStack(spacing: 0) {
+                Text(row.driverVersion.value).font(DesignTokens.Font.small.monospacedDigit())
+                    .lineLimit(1)
+                if let sourceLabel = row.driverVersion.sourceLabel {
+                    Text(sourceLabel).font(DesignTokens.Font.small).lineLimit(1)
+                }
+            }
+            .foregroundColor(DesignTokens.Text.secondary)
+            .frame(width: HistoryTableLayout.versionWidth, height: 28)
+            .help(row.driverVersion.help)
             Text(row.passedSummary)
                 .font(DesignTokens.Font.small.monospacedDigit().weight(.medium))
                 .foregroundColor(DesignTokens.Text.secondary)

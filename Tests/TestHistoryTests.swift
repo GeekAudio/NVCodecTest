@@ -87,6 +87,56 @@ struct TestHistoryTests {
         check(sorted.map(\.id) == ["newer", "newest", "older"],
               "all supplied history rounds display in descending date order")
 
+        func matrixRow(driver: DriverReport?, appVersion: String = "9.9.9") -> TestHistoryMatrixRow {
+            TestHistoryMatrix.rows(entries: [TestHistoryEntry(id: "version-fixture", createdAt: now,
+                report: report(rows: [firstPassed], plan: [first.id], appVersion: appVersion, driver: driver))])[0]
+        }
+        func installed(_ version: String) -> DriverComponent {
+            DriverComponent(name: "NVRM.kext", path: "/fixture/NVRM.kext", identifier: "com.nullmoth.NVRM",
+                            version: version, isKext: true)
+        }
+        var evidence = DriverEvidence()
+        evidence.loadedProbeSucceeded = true
+        evidence.encoderProbeSucceeded = true
+        evidence.nvidiaPCIPresent = true
+        evidence.loadedKexts = [LoadedDriverKext(identifier: "com.nullmoth.NVRM", version: "2.6.4")]
+        evidence.installedComponents = [installed("2.6.5")]
+        let loadedVersion = matrixRow(driver: EnvProbe.evaluateDriver(evidence))
+        check(loadedVersion.driverVersion.value == "2.6.4" && loadedVersion.driverVersion.sourceLabel == nil,
+              "version column uses the saved loaded NVIDIA driver version instead of the app or newer disk version")
+        check(loadedVersion.driverVersion.help.contains("已加载 NVRM")
+              && loadedVersion.driverVersion.help.contains("磁盘安装版本：2.6.5"),
+              "version help distinguishes loaded and installed releases")
+        check(loadedVersion.context.contains("应用版本：9.9.9"),
+              "app version remains available as context without occupying the driver column")
+        evidence.loadedKexts = [LoadedDriverKext(identifier: "com.nullmoth.NVRM", version: "2.6.3")]
+        let olderDriver = matrixRow(driver: EnvProbe.evaluateDriver(evidence))
+        check(olderDriver.driverVersion.value == "2.6.3" && loadedVersion.driverVersion.value == "2.6.4",
+              "different saved rounds retain their own driver snapshots")
+
+        evidence.loadedKexts = [LoadedDriverKext(identifier: "com.nullmoth.NVRM", version: nil)]
+        check(matrixRow(driver: EnvProbe.evaluateDriver(evidence)).driverVersion.value == "未记录",
+              "a missing running release is never backfilled with the installed disk release")
+        evidence.loadedKexts = []
+        evidence.registeredEncoderIDs = ["com.nvmtl.videoencoder.avc.nvenc"]
+        check(matrixRow(driver: EnvProbe.evaluateDriver(evidence)).driverVersion.value == "未记录",
+              "encoder registration does not invent a running release version")
+        evidence.registeredEncoderIDs = []
+        let diskVersion = matrixRow(driver: EnvProbe.evaluateDriver(evidence))
+        check(diskVersion.driverVersion.value == "2.6.5" && diskVersion.driverVersion.sourceLabel == "磁盘"
+              && diskVersion.driverVersion.help.contains("不代表本轮运行版本已确认"),
+              "an installed-only version is visibly labeled as disk evidence")
+        evidence.installedComponents = []
+        evidence.markerPresent = true
+        evidence.markerVersion = "2.6.2"
+        let markerVersion = matrixRow(driver: EnvProbe.evaluateDriver(evidence))
+        check(markerVersion.driverVersion.value == "2.6.2" && markerVersion.driverVersion.sourceLabel == "标记",
+              "a marker-only version is visibly distinguished from a loaded release")
+        let noDriverVersion = matrixRow(driver: nil)
+        check(noDriverVersion.driverVersion.value == "未记录" && noDriverVersion.driverVersion.sourceLabel == nil
+              && noDriverVersion.driverVersion.help.contains("不使用当前驱动或应用版本补值"),
+              "legacy histories without a driver snapshot remain explicitly unrecorded")
+
         if failures.isEmpty {
             print("Test history matrix fixtures: \(checks) checks passed (synthetic reports; no GPU or network)")
         } else {
@@ -96,12 +146,13 @@ struct TestHistoryTests {
         }
     }
 
-    private static func report(rows: [BenchRow], plan: [String]?, appVersion: String = "1.4.5") -> CodecReport {
+    private static func report(rows: [BenchRow], plan: [String]?, appVersion: String = "1.4.5",
+                               driver: DriverReport? = nil) -> CodecReport {
         CodecReport(schemaVersion: 1, appVersion: appVersion, createdAt: Date(timeIntervalSince1970: 1_700_000_000),
             environmentCapturedAt: nil, target: "fixture", runState: "测试完成", wasCancelled: false,
             environment: [EnvRow("系统", "macOS fixture"), EnvRow("机型", "Mac fixture"),
                           EnvRow("CPU", "Intel CPU fixture"), EnvRow("GPU", "NVIDIA fixture")],
-            driverReport: nil, declaredDecoderCapabilities: nil, encoders: [],
+            driverReport: driver, declaredDecoderCapabilities: nil, encoders: [],
             plannedCaseIDs: plan, results: rows, methodology: "fixture method")
     }
 
